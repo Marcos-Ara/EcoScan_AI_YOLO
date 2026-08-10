@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EcoScan AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <div class="app" id="app">
+    <section class="screen active" id="loginScreen">
+      <div class="auth-card">
+        <div class="logo">♻️</div>
+        <h1>EcoScan AI</h1>
+        <p>Entre na sua conta</p>
+
+        <form id="loginForm" class="form">
+          <label>
+            E-mail
+            <input type="email" placeholder="seu@email.com" required />
+          </label>
+
+          <label>
+            Senha
+            <input type="password" placeholder="••••••••" required />
+          </label>
+
+          <button type="submit" class="btn btn-primary">Entrar</button>
+          <button type="button" class="btn btn-outline" id="goRegisterBtn">Criar Conta</button>
+          <button type="button" class="link-btn">Recuperar Senha</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="screen" id="homeScreen">
+      <header class="topbar">
+        <div>
+          <p class="muted">Bem-vindo de volta</p>
+          <h2>Olá, Marcos!</h2>
+        </div>
+        <button class="avatar" id="avatarBtn">M</button>
+      </header>
+
+      <main class="content">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span id="totalCount">0</span>
+            <small>Detectados</small>
+          </div>
+          <div class="stat-card blue">
+            <span id="recycleCount">0</span>
+            <small>Recicláveis</small>
+          </div>
+          <div class="stat-card amber">
+            <span id="organicCount">0</span>
+            <small>Orgânicos</small>
+          </div>
+        </div>
+
+        <button class="scan-btn" id="startScanBtn">
+          <i data-lucide="scan"></i>
+          Iniciar Escaneamento
+        </button>
+
+        <div class="menu-grid">
+          <button class="menu-card" data-go="historyScreen">
+            <i data-lucide="clock-3"></i>
+            <strong>Histórico</strong>
+          </button>
+          <button class="menu-card" data-go="statsScreen">
+            <i data-lucide="bar-chart-3"></i>
+            <strong>Estatísticas</strong>
+          </button>
+          <button class="menu-card" data-go="learnScreen">
+            <i data-lucide="graduation-cap"></i>
+            <strong>Aprender</strong>
+          </button>
+          <button class="menu-card" data-go="achievementsScreen">
+            <i data-lucide="trophy"></i>
+            <strong>Conquistas</strong>
+          </button>
+        </div>
+      </main>
+
+      <nav class="bottom-nav">
+        <button class="nav-item active" data-go="homeScreen"><i data-lucide="home"></i><span>Home</span></button>
+        <button class="nav-item" data-go="cameraScreen"><i data-lucide="scan"></i><span>Scan</span></button>
+        <button class="nav-item" data-go="historyScreen"><i data-lucide="history"></i><span>Histórico</span></button>
+        <button class="nav-item" data-go="settingsScreen"><i data-lucide="settings"></i><span>Config</span></button>
+      </nav>
+    </section>
+
+    <section class="screen" id="cameraScreen">
+      <div class="camera-header">
+        <button class="icon-btn" data-go="homeScreen"><i data-lucide="arrow-left"></i></button>
+        <span class="live-pill">● AO VIVO</span>
+      </div>
+
+      <div class="camera-stage">
+        <video id="cameraFeed" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+
+      <div class="det-card">
+        <div class="drag-bar"></div>
+        <h3 id="detName">Nenhum objeto detectado</h3>
+
+        <div class="det-grid">
+          <div>
+            <span>Tipo</span>
+            <strong id="detType">-</strong>
+          </div>
+          <div>
+            <span>Lixeira</span>
+            <strong id="detBin">-</strong>
+          </div>
+          <div>
+            <span>Destino</span>
+            <strong id="detDest">-</strong>
+          </div>
+          <div>
+            <span>Decomposição</span>
+            <strong id="detTime">-</strong>
+          </div>
+        </div>
+
+        <p id="detFact" class="fact">Clique em "Iniciar Escaneamento" para abrir a câmera.</p>
+
+        <button class="btn btn-primary" id="saveBtn">Salvar Detecção</button>
+      </div>
+    </section>
+
+    <section class="screen" id="historyScreen">
+      <header class="section-header">
+        <button class="icon-btn" data-go="homeScreen"><i data-lucide="arrow-left"></i></button>
+        <h2>Histórico</h2>
+      </header>
+      <main class="list" id="historyList">
+        <p class="empty">Nenhuma detecção salva ainda.</p>
+      </main>
+    </section>
+
+    <section class="screen" id="statsScreen">
+      <header class="section-header">
+        <button class="icon-btn" data-go="homeScreen"><i data-lucide="arrow-left"></i></button>
+        <h2>Estatísticas</h2>
+      </header>
+      <main class="content">
+        <div class="panel">
+          <h3>Distribuição por categoria</h3>
+          <div class="bars">
+            <div class="bar-row"><div class="bar-head"><span>Orgânico</span><span id="sbOrganic">0</span></div><div class="bar-track"><div class="bar-fill amber" id="barOrganic"></div></div></div>
+            <div class="bar-row"><div class="bar-head"><span>Papel</span><span id="sbPaper">0</span></div><div class="bar-track"><div class="bar-fill blue" id="barPaper"></div></div></div>
+            <div class="bar-row"><div class="bar-head"><span>Plástico</span><span id="sbPlastic">0</span></div><div class="bar-track"><div class="bar-fill red" id="barPlastic"></div></div></div>
+            <div class="bar-row"><div class="bar-head"><span>Vidro</span><span id="sbGlass">0</span></div><div class="bar-track"><div class="bar-fill green" id="barGlass"></div></div></div>
+            <div class="bar-row"><div class="bar-head"><span>Metal</span><span id="sbMetal">0</span></div><div class="bar-track"><div class="bar-fill yellow" id="barMetal"></div></div></div>
+            <div class="bar-row"><div class="bar-head"><span>Rejeito</span><span id="sbReject">0</span></div><div class="bar-track"><div class="bar-fill gray" id="barReject"></div></div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Nível ecológico</h3>
+          <strong class="eco-level" id="ecoLevel">🌱 Iniciante Verde</strong>
+          <p class="muted" id="ecoPoints">0 pontos</p>
+        </div>
+      </main>
+    </section>
+
+    <section class="screen" id="learnScreen">
+      <header class="section-header">
+        <button class="icon-btn" data-go="homeScreen"><i data-lucide="arrow-left"></i></button>
+        <h2>Aprender</h2>
+      </header>
+      <main class="list">
+        <article class="info-card"><h3>♻️ Reciclagem</h3><p>Uma garrafa PET leva centenas de anos para se decompor.</p></article>
+        <article class="info-card"><h3>🌱 Compostagem</h3><p>Resíduos orgânicos podem virar adubo natural em poucas semanas.</p></article>
+        <article class="info-card"><h3>🌎 Sustentabilidade</h3><p>Separar o lixo corretamente ajuda o meio ambiente e a coleta seletiva.</p></article>
+        <article class="info-card"><h3>🗑️ Coleta Seletiva</h3><p>Vidro, papel, metal e plástico vão para destinos diferentes.</p></article>
+      </main>
+    </section>
+
+    <section class="screen" id="achievementsScreen">
+      <header class="section-header">
+        <button class="icon-btn" data-go="homeScreen"><i data-lucide="arrow-left"></i></button>
+        <h2>Conquistas</h2>
+      </header>
+      <main class="achievements-grid">
+        <div class="ach-card" id="ach1">
+          <span>🌱</span>
+          <strong>Iniciante Verde</strong>
+          <small>1 detecção</small>
+        </div>
+        <div class="ach-card locked" id="ach2">
+          <span>♻️</span>
+          <strong>Reciclador</strong>
+          <small>10 detecções</small>
+        </div>
+        <div class="ach-card locked" id="ach3">
+          <span>🌎</span>
+          <strong>Guardião Ambiental</strong>
+          <small>25 detecções</small>
+        </div>
+        <div class="ach-card locked" id="ach4">
+          <span>🏆</span>
+          <strong>Mestre Sustentável</strong>
+          <small>50 detecções</small>
+        </div>
+      </main>
+    </section>
+
+    <section class="screen" id="settingsScreen">
+      <header class="section-header">
+        <button class="icon-btn" data-go="homeScreen"><i data-lucide="arrow-left"></i></button>
+        <h2>Configurações</h2>
+      </header>
+      <main class="settings-list">
+        <div class="setting-row">
+          <span>Tema escuro</span>
+          <button class="switch" id="themeSwitch" aria-label="Alternar tema"></button>
+        </div>
+        <div class="setting-row">
+          <span>Notificações</span>
+          <button class="switch on" id="notifSwitch" aria-label="Notificações"></button>
+        </div>
+        <div class="setting-row plain">Idioma: Português (BR)</div>
+        <div class="setting-row plain">Sobre o EcoScan AI</div>
+        <div class="setting-row plain">Privacidade</div>
+        <button class="setting-row danger" id="logoutBtn">Sair da Conta</button>
+      </main>
+    </section>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
