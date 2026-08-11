@@ -7,10 +7,12 @@ from pathlib import Path
 # ============================================================
 
 # Render Free possui memória limitada.
-# Limitar threads evita que o PyTorch crie estruturas
-# adicionais desnecessárias na inicialização.
+# Limitar threads reduz o consumo de memória e CPU do PyTorch.
+
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 import cv2
 import numpy as np
@@ -23,6 +25,7 @@ try:
     torch.set_num_interop_threads(1)
 except RuntimeError:
     pass
+
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,7 +60,6 @@ if not MODEL_PATH.exists():
 
 sys.path.insert(0, str(YOLOV7_DIR))
 
-
 from models.experimental import attempt_load
 from utils.datasets import letterbox
 from utils.general import non_max_suppression, scale_coords
@@ -76,10 +78,9 @@ IOU = float(
     os.getenv("IOU", "0.45")
 )
 
-# Reduzimos de 512 para 416 para diminuir
-# o consumo de memória durante a inferência.
+# 416 reduz bastante o consumo de memória em relação a 512.
 IMG_SIZE = int(
-    os.getenv("IMG_SIZE", "416")
+    os.getenv("IMG_SIZE", "320")
 )
 
 DEVICE_NAME = os.getenv(
@@ -89,21 +90,31 @@ DEVICE_NAME = os.getenv(
 
 
 # ============================================================
+# LIMITES DE SEGURANÇA
+# ============================================================
+
+# Limite máximo do arquivo recebido.
+MAX_FILE_SIZE = 2_500_000
+
+# Número máximo de detecções retornadas.
+MAX_DETECTIONS = 50
+
+
+# ============================================================
 # CLASSES DO GREENSORTER
 # ============================================================
 
-# O modelo atual do GreenSorter possui estas classes:
+# O modelo atual possui estas classes:
 #
 # cardboard      -> papel
 # metal          -> metal
 # rigid_plastic  -> plástico
 # soft_plastic   -> plástico
 #
-# O modelo atual não possui pesos específicos para:
+# O modelo atual NÃO possui pesos específicos para:
 # vidro, orgânico ou rejeito.
 #
-# Portanto NÃO vamos fingir que ele consegue detectar
-# essas classes.
+# Portanto não vamos fingir que o modelo detecta essas classes.
 
 CLASS_MAP = {
     "cardboard": "papel",
@@ -118,7 +129,6 @@ CLASS_MAP = {
 # ============================================================
 
 RULES = {
-
     "papel": {
         "category": "Papel",
         "bin": "🔵 Azul",
@@ -192,12 +202,10 @@ model = attempt_load(
     map_location=device
 )
 
-
 model.eval()
 
 
-# Caso futuramente utilizemos GPU,
-# o modelo poderá usar half precision.
+# Half precision somente se estiver usando GPU.
 if device.type != "cpu":
     model.half()
 
@@ -232,13 +240,11 @@ allowed_origin = os.getenv(
     "*"
 )
 
-
 origins = [
     item.strip()
     for item in allowed_origin.split(",")
     if item.strip()
 ]
-
 
 if not origins:
     origins = ["*"]
@@ -246,17 +252,14 @@ if not origins:
 
 app.add_middleware(
     CORSMiddleware,
-
     allow_origins=origins,
-
     allow_credentials=False,
-
     allow_methods=[
         "GET",
         "POST",
+        "HEAD",
         "OPTIONS",
     ],
-
     allow_headers=["*"],
 )
 
@@ -266,8 +269,8 @@ app.add_middleware(
 # ============================================================
 
 @app.get("/")
+@app.head("/")
 def root():
-
     return {
         "service": "EcoScan AI YOLO API",
         "status": "online",
@@ -285,24 +288,14 @@ def root():
 
 @app.get("/health")
 def health():
-
     return {
         "ok": True,
-
         "model_loaded": model is not None,
-
         "model": "GreenSorter YOLOv7",
-
         "device": str(device),
-
-        "classes": list(
-            CLASS_MAP.keys()
-        ),
-
+        "classes": list(CLASS_MAP.keys()),
         "confidence": CONFIDENCE,
-
         "iou": IOU,
-
         "img_size": IMG_SIZE,
     }
 
@@ -316,296 +309,322 @@ async def predict(
     file: UploadFile = File(...)
 ):
 
-    # --------------------------------------------------------
-    # VALIDAR MIME TYPE
-    # --------------------------------------------------------
+    raw = None
+    frame = None
+    img = None
+    tensor = None
+    pred = None
+    det = None
 
-    if (
-        not file.content_type
-        or not file.content_type.startswith("image/")
-    ):
+    try:
 
-        raise HTTPException(
-            status_code=400,
-            detail="Envie uma imagem."
-        )
+        # ----------------------------------------------------
+        # VALIDAR MIME TYPE
+        # ----------------------------------------------------
 
-
-    # --------------------------------------------------------
-    # READ FILE
-    # --------------------------------------------------------
-
-    raw = await file.read()
-
-
-    if not raw:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Imagem vazia."
-        )
-
-
-    # --------------------------------------------------------
-    # LIMITAR TAMANHO DA IMAGEM
-    # --------------------------------------------------------
-
-    MAX_FILE_SIZE = 2_500_000
-
-
-    if len(raw) > MAX_FILE_SIZE:
-
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                "Imagem muito grande. "
-                "Envie uma imagem menor."
+        if (
+            not file.content_type
+            or not file.content_type.startswith("image/")
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Envie uma imagem."
             )
+
+
+        # ----------------------------------------------------
+        # READ FILE
+        # ----------------------------------------------------
+
+        raw = await file.read()
+
+        if not raw:
+            raise HTTPException(
+                status_code=400,
+                detail="Imagem vazia."
+            )
+
+
+        # ----------------------------------------------------
+        # LIMITAR TAMANHO DA IMAGEM
+        # ----------------------------------------------------
+
+        if len(raw) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Imagem muito grande. "
+                    "Envie uma imagem menor."
+                )
+            )
+
+
+        # ----------------------------------------------------
+        # DECODE
+        # ----------------------------------------------------
+
+        frame = cv2.imdecode(
+            np.frombuffer(
+                raw,
+                dtype=np.uint8
+            ),
+            cv2.IMREAD_COLOR
         )
 
 
-    # --------------------------------------------------------
-    # DECODE
-    # --------------------------------------------------------
-
-    frame = cv2.imdecode(
-        np.frombuffer(
-            raw,
-            dtype=np.uint8
-        ),
-        cv2.IMREAD_COLOR
-    )
+        if frame is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Imagem inválida."
+            )
 
 
-    if frame is None:
+        original_h, original_w = frame.shape[:2]
 
-        raise HTTPException(
-            status_code=400,
-            detail="Imagem inválida."
+
+        # ----------------------------------------------------
+        # PREPROCESSAMENTO
+        # ----------------------------------------------------
+
+        img = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2RGB
         )
 
 
-    original_h, original_w = frame.shape[:2]
-
-
-    # --------------------------------------------------------
-    # PREPROCESSAMENTO
-    # --------------------------------------------------------
-
-    img = cv2.cvtColor(
-        frame,
-        cv2.COLOR_BGR2RGB
-    )
-
-
-    img = letterbox(
-        img,
-        IMG_SIZE,
-        stride=32,
-        auto=True
-    )[0]
-
-
-    img = img.transpose(
-        (2, 0, 1)
-    )
-
-
-    img = np.ascontiguousarray(
-        img
-    )
-
-
-    tensor = torch.from_numpy(
-        img
-    ).to(device)
-
-
-    if device.type != "cpu":
-
-        tensor = tensor.half()
-
-    else:
-
-        tensor = tensor.float()
-
-
-    tensor /= 255.0
-
-
-    if tensor.ndimension() == 3:
-
-        tensor = tensor.unsqueeze(0)
-
-
-    # --------------------------------------------------------
-    # INFERENCE
-    # --------------------------------------------------------
-
-    # inference_mode é mais econômico que no_grad
-    # para uma aplicação que apenas faz inferência.
-    with torch.inference_mode():
-
-        pred = model(
-            tensor,
-            augment=False
+        img = letterbox(
+            img,
+            IMG_SIZE,
+            stride=32,
+            auto=True
         )[0]
 
 
-    # --------------------------------------------------------
-    # NON-MAX SUPPRESSION
-    # --------------------------------------------------------
-
-    det = non_max_suppression(
-        pred,
-        CONFIDENCE,
-        IOU,
-        classes=None,
-        agnostic=False,
-    )[0]
+        img = img.transpose(
+            (2, 0, 1)
+        )
 
 
-    results = []
+        img = np.ascontiguousarray(
+            img
+        )
 
 
-    # --------------------------------------------------------
-    # PROCESSAR DETECÇÕES
-    # --------------------------------------------------------
-
-    if det is not None and len(det):
-
-        det[:, :4] = scale_coords(
-            tensor.shape[2:],
-            det[:, :4],
-            frame.shape,
-        ).round()
+        tensor = torch.from_numpy(
+            img
+        ).to(device)
 
 
-        for *xyxy, conf, cls in det.tolist():
-
-            class_id = int(cls)
-
-
-            # Segurança contra índice inválido
-            if (
-                class_id < 0
-                or class_id >= len(names)
-            ):
-
-                continue
+        if device.type != "cpu":
+            tensor = tensor.half()
+        else:
+            tensor = tensor.float()
 
 
-            source_class = str(
-                names[class_id]
-            ).lower().strip()
+        tensor /= 255.0
 
 
-            category_key = CLASS_MAP.get(
-                source_class
-            )
+        if tensor.ndimension() == 3:
+            tensor = tensor.unsqueeze(0)
 
 
-            # Ignorar classes que não fazem parte
-            # das classes recicláveis configuradas.
-            if category_key is None:
+        # ----------------------------------------------------
+        # INFERENCE
+        # ----------------------------------------------------
 
-                continue
+        with torch.inference_mode():
 
-
-            x1, y1, x2, y2 = map(
-                int,
-                xyxy
-            )
-
-
-            rule = RULES[
-                category_key
-            ]
+            pred = model(
+                tensor,
+                augment=False
+            )[0]
 
 
-            results.append({
+        # ----------------------------------------------------
+        # NON-MAX SUPPRESSION
+        # ----------------------------------------------------
 
-                "source_class":
-                    source_class,
-
-                "category":
-                    rule["category"],
-
-                "category_key":
-                    category_key,
-
-                "bin":
-                    rule["bin"],
-
-                "destination":
-                    rule["destination"],
-
-                "decomposition":
-                    rule["decomposition"],
-
-                "score":
-                    float(conf),
-
-                "bbox": [
-                    x1,
-                    y1,
-
-                    max(
-                        0,
-                        x2 - x1
-                    ),
-
-                    max(
-                        0,
-                        y2 - y1
-                    ),
-                ],
-            })
+        det = non_max_suppression(
+            pred,
+            CONFIDENCE,
+            IOU,
+            classes=None,
+            agnostic=False,
+        )[0]
 
 
-    # --------------------------------------------------------
-    # ORDENAR POR CONFIANÇA
-    # --------------------------------------------------------
-
-    results.sort(
-        key=lambda item: item["score"],
-        reverse=True
-    )
+        results = []
 
 
-    # --------------------------------------------------------
-    # LIBERAR MEMÓRIA TEMPORÁRIA
-    # --------------------------------------------------------
+        # ----------------------------------------------------
+        # PROCESSAR DETECÇÕES
+        # ----------------------------------------------------
 
-    # O modelo permanece carregado.
-    # Somente os objetos utilizados nesta requisição
-    # são liberados.
+        if det is not None and len(det):
 
-    del pred
-    del det
-    del tensor
-    del img
-    del frame
+            det[:, :4] = scale_coords(
+                tensor.shape[2:],
+                det[:, :4],
+                frame.shape,
+            ).round()
 
 
-    # --------------------------------------------------------
-    # RESPOSTA
-    # --------------------------------------------------------
+            # Limitar quantidade de detecções processadas.
+            if len(det) > MAX_DETECTIONS:
+                det = det[:MAX_DETECTIONS]
 
-    return {
 
-        "predictions":
-            results,
+            for *xyxy, conf, cls in det.tolist():
 
-        "model":
-            "GreenSorter YOLOv7",
+                class_id = int(cls)
 
-        "image": {
 
-            "width":
-                original_w,
+                # Segurança contra índice inválido.
+                if (
+                    class_id < 0
+                    or class_id >= len(names)
+                ):
+                    continue
 
-            "height":
-                original_h,
-        },
-    }
+
+                source_class = str(
+                    names[class_id]
+                ).lower().strip()
+
+
+                category_key = CLASS_MAP.get(
+                    source_class
+                )
+
+
+                # Ignorar classes que não fazem parte
+                # das classes recicláveis configuradas.
+                if category_key is None:
+                    continue
+
+
+                x1, y1, x2, y2 = map(
+                    int,
+                    xyxy
+                )
+
+
+                rule = RULES.get(
+                    category_key
+                )
+
+
+                if rule is None:
+                    continue
+
+
+                results.append(
+                    {
+                        "source_class": source_class,
+
+                        "category": rule["category"],
+
+                        "category_key": category_key,
+
+                        "bin": rule["bin"],
+
+                        "destination": rule["destination"],
+
+                        "decomposition": rule["decomposition"],
+
+                        "score": float(conf),
+
+                        "bbox": [
+                            max(0, x1),
+                            max(0, y1),
+
+                            max(
+                                0,
+                                x2 - x1
+                            ),
+
+                            max(
+                                0,
+                                y2 - y1
+                            ),
+                        ],
+                    }
+                )
+
+
+        # ----------------------------------------------------
+        # ORDENAR POR CONFIANÇA
+        # ----------------------------------------------------
+
+        results.sort(
+            key=lambda item: item["score"],
+            reverse=True
+        )
+
+
+        # ----------------------------------------------------
+        # RESPOSTA
+        # ----------------------------------------------------
+
+        return {
+            "predictions": results,
+
+            "model": "GreenSorter YOLOv7",
+
+            "image": {
+                "width": original_w,
+                "height": original_h,
+            },
+        }
+
+
+    except HTTPException:
+        raise
+
+
+    except RuntimeError as exc:
+
+        # Evita expor detalhes internos do modelo.
+        print(
+            f"[EcoScan] Erro de execução: {exc}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Erro durante a execução do modelo."
+        )
+
+
+    except Exception as exc:
+
+        print(
+            f"[EcoScan] Erro inesperado: {exc}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Erro interno ao processar a imagem."
+        )
+
+
+    finally:
+
+        # ----------------------------------------------------
+        # LIBERAR MEMÓRIA TEMPORÁRIA
+        # ----------------------------------------------------
+
+        raw = None
+        frame = None
+        img = None
+        tensor = None
+        pred = None
+        det = None
+
+        # No CPU não existe cache CUDA para limpar.
+        # Se futuramente o projeto usar GPU, limpamos o cache.
+        if torch.cuda.is_available():
+
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass

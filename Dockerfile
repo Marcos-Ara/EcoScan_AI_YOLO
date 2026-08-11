@@ -53,7 +53,7 @@ RUN python download_model.py
 ENV DEVICE=cpu
 ENV CONFIDENCE=0.35
 ENV IOU=0.45
-ENV IMG_SIZE=512
+ENV IMG_SIZE=320
 
 
 # ============================================================
