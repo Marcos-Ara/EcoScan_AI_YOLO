@@ -2,9 +2,27 @@ import os
 import sys
 from pathlib import Path
 
+# ============================================================
+# OTIMIZAÇÃO DE MEMÓRIA / CPU
+# ============================================================
+
+# Render Free possui memória limitada.
+# Limitar threads evita que o PyTorch crie estruturas
+# adicionais desnecessárias na inicialização.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import cv2
 import numpy as np
 import torch
+
+# Limitar threads do PyTorch
+torch.set_num_threads(1)
+
+try:
+    torch.set_num_interop_threads(1)
+except RuntimeError:
+    pass
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,10 +37,12 @@ ROOT = Path(__file__).resolve().parent
 YOLOV7_DIR = ROOT / "GreenSorter" / "yolov7"
 MODEL_PATH = ROOT / "model.pt"
 
+
 if not YOLOV7_DIR.exists():
     raise RuntimeError(
         f"Diretório YOLOv7 não encontrado: {YOLOV7_DIR}"
     )
+
 
 if not MODEL_PATH.exists():
     raise RuntimeError(
@@ -56,8 +76,10 @@ IOU = float(
     os.getenv("IOU", "0.45")
 )
 
+# Reduzimos de 512 para 416 para diminuir
+# o consumo de memória durante a inferência.
 IMG_SIZE = int(
-    os.getenv("IMG_SIZE", "512")
+    os.getenv("IMG_SIZE", "416")
 )
 
 DEVICE_NAME = os.getenv(
@@ -70,16 +92,18 @@ DEVICE_NAME = os.getenv(
 # CLASSES DO GREENSORTER
 # ============================================================
 
-# O modelo atual do GreenSorter possui estas classes.
+# O modelo atual do GreenSorter possui estas classes:
 #
 # cardboard      -> papel
 # metal          -> metal
 # rigid_plastic  -> plástico
 # soft_plastic   -> plástico
 #
-# Não vamos fingir que o modelo atual detecta vidro,
-# orgânico ou rejeito enquanto não houver pesos treinados
-# para essas classes.
+# O modelo atual não possui pesos específicos para:
+# vidro, orgânico ou rejeito.
+#
+# Portanto NÃO vamos fingir que ele consegue detectar
+# essas classes.
 
 CLASS_MAP = {
     "cardboard": "papel",
@@ -143,7 +167,9 @@ RULES = {
 # DEVICE
 # ============================================================
 
-device = select_device(DEVICE_NAME)
+device = select_device(
+    DEVICE_NAME
+)
 
 
 # ============================================================
@@ -157,6 +183,7 @@ print(f"[EcoScan] Device: {device}")
 print(f"[EcoScan] Confidence: {CONFIDENCE}")
 print(f"[EcoScan] IoU: {IOU}")
 print(f"[EcoScan] Image size: {IMG_SIZE}")
+print("[EcoScan] PyTorch threads: 1")
 print("=" * 60)
 
 
@@ -165,9 +192,12 @@ model = attempt_load(
     map_location=device
 )
 
+
 model.eval()
 
 
+# Caso futuramente utilizemos GPU,
+# o modelo poderá usar half precision.
 if device.type != "cpu":
     model.half()
 
@@ -185,7 +215,7 @@ print(f"[EcoScan] Classes do modelo: {names}")
 
 app = FastAPI(
     title="EcoScan AI YOLO API",
-    version="1.1.0",
+    version="1.2.0",
     description=(
         "API de detecção de resíduos recicláveis "
         "usando YOLOv7 GreenSorter."
@@ -202,11 +232,13 @@ allowed_origin = os.getenv(
     "*"
 )
 
+
 origins = [
     item.strip()
     for item in allowed_origin.split(",")
     if item.strip()
 ]
+
 
 if not origins:
     origins = ["*"]
@@ -240,7 +272,7 @@ def root():
         "service": "EcoScan AI YOLO API",
         "status": "online",
         "model": "GreenSorter YOLOv7",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "health": "/health",
         "predict": "/predict",
         "docs": "/docs",
@@ -256,12 +288,21 @@ def health():
 
     return {
         "ok": True,
+
         "model_loaded": model is not None,
+
         "model": "GreenSorter YOLOv7",
+
         "device": str(device),
-        "classes": list(CLASS_MAP.keys()),
+
+        "classes": list(
+            CLASS_MAP.keys()
+        ),
+
         "confidence": CONFIDENCE,
+
         "iou": IOU,
+
         "img_size": IMG_SIZE,
     }
 
@@ -283,6 +324,7 @@ async def predict(
         not file.content_type
         or not file.content_type.startswith("image/")
     ):
+
         raise HTTPException(
             status_code=400,
             detail="Envie uma imagem."
@@ -305,10 +347,11 @@ async def predict(
 
 
     # --------------------------------------------------------
-    # LIMITAR TAMANHO
+    # LIMITAR TAMANHO DA IMAGEM
     # --------------------------------------------------------
 
     MAX_FILE_SIZE = 2_500_000
+
 
     if len(raw) > MAX_FILE_SIZE:
 
@@ -368,7 +411,9 @@ async def predict(
     )
 
 
-    img = np.ascontiguousarray(img)
+    img = np.ascontiguousarray(
+        img
+    )
 
 
     tensor = torch.from_numpy(
@@ -397,7 +442,9 @@ async def predict(
     # INFERENCE
     # --------------------------------------------------------
 
-    with torch.no_grad():
+    # inference_mode é mais econômico que no_grad
+    # para uma aplicação que apenas faz inferência.
+    with torch.inference_mode():
 
         pred = model(
             tensor,
@@ -440,7 +487,10 @@ async def predict(
 
 
             # Segurança contra índice inválido
-            if class_id < 0 or class_id >= len(names):
+            if (
+                class_id < 0
+                or class_id >= len(names)
+            ):
 
                 continue
 
@@ -455,8 +505,8 @@ async def predict(
             )
 
 
-            # Ignorar classes que não pertencem
-            # ao nosso mapa atual.
+            # Ignorar classes que não fazem parte
+            # das classes recicláveis configuradas.
             if category_key is None:
 
                 continue
@@ -497,7 +547,6 @@ async def predict(
                     float(conf),
 
                 "bbox": [
-
                     x1,
                     y1,
 
@@ -525,12 +574,28 @@ async def predict(
 
 
     # --------------------------------------------------------
+    # LIBERAR MEMÓRIA TEMPORÁRIA
+    # --------------------------------------------------------
+
+    # O modelo permanece carregado.
+    # Somente os objetos utilizados nesta requisição
+    # são liberados.
+
+    del pred
+    del det
+    del tensor
+    del img
+    del frame
+
+
+    # --------------------------------------------------------
     # RESPOSTA
     # --------------------------------------------------------
 
     return {
 
-        "predictions": results,
+        "predictions":
+            results,
 
         "model":
             "GreenSorter YOLOv7",
