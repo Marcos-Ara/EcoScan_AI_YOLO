@@ -8,6 +8,7 @@ venv/
 
 # Model downloaded by Render
 backend/model.pt
+backend/model.onnx
 
 # Local outputs
 runs/

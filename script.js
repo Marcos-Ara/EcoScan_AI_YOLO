@@ -18,6 +18,12 @@ const startScanBtn =
 const saveBtn =
   document.getElementById('saveBtn');
 
+const selectImageBtn =
+  document.getElementById('selectImageBtn');
+
+const imageInput =
+  document.getElementById('imageInput');
+
 const themeSwitch =
   document.getElementById('themeSwitch');
 
@@ -72,15 +78,15 @@ const API_BASE = (
 // CONFIGURAÇÕES
 // ============================================================
 
-const DETECTION_INTERVAL_MS = 1200;
+const DETECTION_INTERVAL_MS = 2500;
 
 const MIN_CONFIDENCE = 0.35;
 
 const MAX_BOXES = 5;
 
-const MAX_FRAME_WIDTH = 512;
+const MAX_FRAME_WIDTH = 320;
 
-const API_TIMEOUT_MS = 12000;
+const API_TIMEOUT_MS = 30000;
 
 
 // ============================================================
@@ -102,6 +108,8 @@ let lastPredictions = [];
 let lastDetectionData = null;
 
 let apiOnline = false;
+
+let staticImageMode = false;
 
 let savedDetections =
   loadSavedDetections();
@@ -277,6 +285,16 @@ function init() {
   saveBtn?.addEventListener(
     'click',
     saveCurrentDetection
+  );
+
+  selectImageBtn?.addEventListener(
+    'click',
+    () => imageInput?.click()
+  );
+
+  imageInput?.addEventListener(
+    'change',
+    handleImageSelection
   );
 
 
@@ -1000,6 +1018,12 @@ function renderAchievements() {
 
 async function openCamera() {
 
+  staticImageMode = false;
+
+  if (cameraFeed) {
+    cameraFeed.style.opacity = '1';
+  }
+
   if (stream) return;
 
 
@@ -1199,6 +1223,8 @@ function stopCamera() {
 
   detectionLoopActive =
     false;
+
+  staticImageMode = false;
 
 
   lastPredictions =
@@ -1418,6 +1444,10 @@ function waitForVideoMetadata(
 
 function resizeOverlay() {
 
+  if (staticImageMode) {
+    return;
+  }
+
   if (
     !cameraFeed?.videoWidth ||
     !cameraFeed?.videoHeight ||
@@ -1440,8 +1470,247 @@ function resizeOverlay() {
 
 
 // ============================================================
+// TESTE MANUAL POR IMAGEM
+// ============================================================
+
+async function handleImageSelection(event) {
+
+  const file =
+    event.target.files?.[0];
+
+  event.target.value = '';
+
+  if (!file) return;
+
+  if (!file.type.startsWith('image/')) {
+
+    alert('Selecione uma imagem válida.');
+
+    return;
+  }
+
+  try {
+
+    stopCamera();
+
+    staticImageMode = true;
+
+    setDetectionStatus(
+      '🖼️ Preparando imagem...'
+    );
+
+    const image =
+      await loadImageFile(file);
+
+    const maxDimension = 960;
+
+    const scale =
+      Math.min(
+        1,
+        maxDimension /
+          Math.max(
+            image.naturalWidth,
+            image.naturalHeight
+          )
+      );
+
+    const width =
+      Math.max(
+        1,
+        Math.round(
+          image.naturalWidth * scale
+        )
+      );
+
+    const height =
+      Math.max(
+        1,
+        Math.round(
+          image.naturalHeight * scale
+        )
+      );
+
+    frameCanvas =
+      document.createElement('canvas');
+
+    frameCanvas.width = width;
+    frameCanvas.height = height;
+
+    frameContext =
+      frameCanvas.getContext('2d');
+
+    frameContext.drawImage(
+      image,
+      0,
+      0,
+      width,
+      height
+    );
+
+    const blob =
+      await canvasToBlob(
+        frameCanvas,
+        0.60
+      );
+
+    const formData =
+      new FormData();
+
+    formData.append(
+      'file',
+      blob,
+      'image.jpg'
+    );
+
+    setDetectionStatus(
+      '🤖 Analisando imagem...'
+    );
+
+    const response =
+      await fetchWithTimeout(
+        `${API_BASE}/predict`,
+        {
+          method: 'POST',
+          body: formData,
+          cache: 'no-store'
+        },
+        API_TIMEOUT_MS
+      );
+
+    if (!response.ok) {
+
+      const message =
+        await response.text();
+
+      throw new Error(
+        `API ${response.status}: ${message}`
+      );
+    }
+
+    const result =
+      await response.json();
+
+    apiOnline = true;
+
+    overlay.width = width;
+    overlay.height = height;
+
+    const ctx =
+      overlay.getContext('2d');
+
+    ctx.clearRect(
+      0,
+      0,
+      width,
+      height
+    );
+
+    ctx.drawImage(
+      image,
+      0,
+      0,
+      width,
+      height
+    );
+
+    lastPredictions =
+      result.predictions || [];
+
+    drawPredictions(
+      lastPredictions,
+      true
+    );
+
+    updateDetectionCard(
+      lastPredictions
+    );
+
+    setDetectionStatus(
+      lastPredictions.length
+        ? '🖼️ Imagem analisada • 🤖 YOLO conectado'
+        : '🖼️ Imagem analisada • nenhum objeto reconhecido'
+    );
+
+  } catch (error) {
+
+    console.error(
+      'Erro ao analisar imagem:',
+      error
+    );
+
+    apiOnline = false;
+
+    setDetectionStatus(
+      '❌ Não foi possível analisar a imagem.'
+    );
+
+    updateDetectionCard([]);
+
+    alert(
+      `Não foi possível analisar a imagem.\n\n${error.message || error}`
+    );
+
+  }
+}
+
+
+function loadImageFile(file) {
+
+  return new Promise(
+    (resolve, reject) => {
+
+      const url =
+        URL.createObjectURL(file);
+
+      const image =
+        new Image();
+
+      image.onload = () => {
+
+        URL.revokeObjectURL(url);
+
+        if (
+          !image.naturalWidth ||
+          !image.naturalHeight
+        ) {
+
+          reject(
+            new Error(
+              'A imagem não possui dimensões válidas.'
+            )
+          );
+
+          return;
+        }
+
+        resolve(image);
+
+      };
+
+      image.onerror = () => {
+
+        URL.revokeObjectURL(url);
+
+        reject(
+          new Error(
+            'Não foi possível abrir a imagem.'
+          )
+        );
+
+      };
+
+      image.src = url;
+
+    }
+  );
+
+}
+
+
+// ============================================================
 // LOOP YOLO
 // ============================================================
+
 
 async function startDetectionLoop() {
 
@@ -1822,7 +2091,8 @@ function canvasToBlob(
 // ============================================================
 
 function drawPredictions(
-  predictions
+  predictions,
+  preserveBackground = false
 ) {
 
   resizeOverlay();
@@ -1837,12 +2107,14 @@ function drawPredictions(
     );
 
 
-  ctx.clearRect(
-    0,
-    0,
-    overlay.width,
-    overlay.height
-  );
+  if (!preserveBackground) {
+    ctx.clearRect(
+      0,
+      0,
+      overlay.width,
+      overlay.height
+    );
+  }
 
 
   if (

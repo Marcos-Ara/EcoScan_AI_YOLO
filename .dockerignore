@@ -1,0 +1,23 @@
+# Git
+.git
+.gitignore
+
+# Documentação e arquivos que não entram no build
+*.md
+*.pdf
+*.ipynb
+
+# Ferramentas/testes do repositório YOLOv7 que não são necessários
+backend/GreenSorter/yolov7/tools/
+backend/GreenSorter/yolov7/paper/
+backend/GreenSorter/yolov7/deploy/
+backend/GreenSorter/yolov7/train.py
+backend/GreenSorter/yolov7/train_aux.py
+backend/GreenSorter/yolov7/test.py
+backend/GreenSorter/yolov7/detect.py
+backend/GreenSorter/yolov7/export.py
+
+# Caches
+__pycache__/
+*.pyc
+.pytest_cache/
