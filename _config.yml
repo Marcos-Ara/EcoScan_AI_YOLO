@@ -1,0 +1,13 @@
+# GitHub Pages configuration
+
+exclude:
+  - backend
+  - README.md
+  - README.txt
+  - README_ECOSCAN_YOLO.md
+  - README_RENDER.md
+  - render.yaml
+  - Dockerfile
+  - requirements.txt
+  - start_backend.ps1
+  - start_frontend.ps1
