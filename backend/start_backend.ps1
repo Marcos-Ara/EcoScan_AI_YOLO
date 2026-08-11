@@ -1,11 +1,14 @@
 $ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
 
-$Backend = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $Backend
-
-if (-not (Test-Path ".\.venv\Scripts\python.exe")) {
-    Write-Host "Ambiente Python nao encontrado. Execute .\setup_model.ps1 primeiro."
-    exit 1
+if (!(Test-Path ".venv")) {
+    python -m venv .venv
 }
 
-& ".\.venv\Scripts\python.exe" -m uvicorn app:app --host 127.0.0.1 --port 8000
+& ".venv\Scripts\python.exe" -m pip install -r requirements.txt
+
+if (!(Test-Path "model.pt")) {
+    & ".venv\Scripts\python.exe" download_model.py
+}
+
+& ".venv\Scripts\python.exe" -m uvicorn app:app --host 0.0.0.0 --port 8000

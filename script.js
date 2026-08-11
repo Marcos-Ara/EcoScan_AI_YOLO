@@ -17,10 +17,11 @@ const detDest = document.getElementById('detDest');
 const detTime = document.getElementById('detTime');
 const detFact = document.getElementById('detFact');
 
-const API_BASE = window.ECOSCAN_API_BASE || 'http://127.0.0.1:8000';
-const DETECTION_INTERVAL_MS = 140;
+const API_BASE = (window.ECOSCAN_API_BASE || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const DETECTION_INTERVAL_MS = 900;
 const MIN_CONFIDENCE = 0.35;
 const MAX_BOXES = 5;
+const MAX_FRAME_WIDTH = 512;
 
 let currentScreen = 'loginScreen';
 let stream = null;
@@ -343,13 +344,25 @@ async function openCamera() {
       console.debug('Zoom não suportado:', zoomError);
     }
 
-    const health = await fetchJson(`${API_BASE}/health`);
-    if (!health?.model_loaded) {
-      throw new Error('O backend está ativo, mas o modelo GreenSorter não foi carregado.');
-    }
+    // A câmera não depende do backend. Se o Render estiver offline,
+    // a câmera continua funcionando e apenas o detector fica indisponível.
+    try {
+      const health = await fetchJson(`${API_BASE}/health`);
 
-    setDetectionStatus('📷 Câmera ativa. Aponte para um resíduo.');
-    startDetectionLoop();
+      if (health?.model_loaded) {
+        setDetectionStatus('📷 Câmera ativa • 🤖 YOLO conectado');
+        startDetectionLoop();
+      } else {
+        setDetectionStatus('📷 Câmera ativa • ⚠️ YOLO sem modelo');
+        showDetectorWarning('A câmera está funcionando, mas o modelo YOLO não está disponível.');
+      }
+    } catch (apiError) {
+      console.warn('Backend YOLO indisponível:', apiError);
+      setDetectionStatus('📷 Câmera ativa • ⚠️ detector offline');
+      showDetectorWarning(
+        'A câmera está funcionando. O detector YOLO está offline ou a URL da API está incorreta.'
+      );
+    }
   } catch (error) {
     console.error('Erro ao abrir câmera:', error);
     stopCamera();
@@ -359,6 +372,32 @@ async function openCamera() {
     if (cameraFallback) cameraFallback.hidden = false;
     alert(formatCameraError(error));
   }
+}
+
+function showDetectorWarning(message) {
+  if (document.querySelector('.detector-warning')) return;
+
+  const warning = document.createElement('div');
+  warning.className = 'detector-warning';
+  warning.textContent = message;
+
+  Object.assign(warning.style, {
+    position: 'fixed',
+    left: '16px',
+    right: '16px',
+    bottom: '96px',
+    zIndex: '9999',
+    padding: '12px 14px',
+    borderRadius: '14px',
+    background: 'rgba(255, 193, 7, .96)',
+    color: '#1b1b1b',
+    fontWeight: '700',
+    fontSize: '13px',
+    boxShadow: '0 8px 30px rgba(0,0,0,.18)'
+  });
+
+  document.body.appendChild(warning);
+  setTimeout(() => warning.remove(), 7000);
 }
 
 function stopCamera() {
@@ -383,10 +422,6 @@ function stopCamera() {
 }
 
 function formatCameraError(err) {
-  if (err?.message?.includes('backend') || err?.message?.includes('modelo')) {
-    return `${err.message}\n\nInicie o backend e confirme que backend/model/model.pt existe.`;
-  }
-
   if (!err?.name) return err?.message || 'Erro ao acessar a câmera.';
   if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
     return 'Permita o acesso à câmera para continuar.';
@@ -449,7 +484,9 @@ async function startDetectionLoop() {
       }
     } catch (error) {
       console.error('Detection error:', error);
-      setDetectionStatus('⚠️ Falha momentânea no detector...');
+      setDetectionStatus('⚠️ Detector YOLO indisponível...');
+      // Evita bombardear um backend que está acordando, reiniciando ou fora do ar.
+      await sleep(1800);
     }
 
     await sleep(DETECTION_INTERVAL_MS);
@@ -457,7 +494,7 @@ async function startDetectionLoop() {
 }
 
 async function detectFrame() {
-  const maxWidth = 640;
+  const maxWidth = MAX_FRAME_WIDTH;
   const scale = Math.min(1, maxWidth / cameraFeed.videoWidth);
 
   frameCanvas.width = Math.max(1, Math.round(cameraFeed.videoWidth * scale));
