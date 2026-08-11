@@ -19,7 +19,7 @@ services:
         value: "0.45"
 
       - key: IMG_SIZE
-        value: "512"
+        value: "224"
 
       - key: ALLOWED_ORIGIN
         value: "*"
