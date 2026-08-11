@@ -1,12 +1,17 @@
 /*
- * EcoScan API
+ * ============================================================
+ * EcoScan AI - Configuração da API
+ * ============================================================
  *
- * LOCAL:
- *   http://127.0.0.1:8000
+ * O frontend está hospedado no GitHub Pages.
  *
- * PRODUÇÃO:
- *   Depois do Render, coloque aqui a URL HTTPS real.
- *   Exemplo:
- *   window.ECOSCAN_API_BASE = 'https://ecoscan-yolo-api.onrender.com';
+ * A IA está hospedada no Render.
+ *
+ * Portanto NÃO devemos usar localhost aqui.
+ *
+ * localhost / 127.0.0.1 apontaria para o celular,
+ * e não para o servidor Render.
  */
-window.ECOSCAN_API_BASE = 'http://127.0.0.1:8000';
+
+window.ECOSCAN_API_BASE =
+  'https://ecoscan-yolo-api.onrender.com';

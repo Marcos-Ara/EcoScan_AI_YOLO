@@ -1,22 +1,25 @@
 services:
   - type: web
     name: ecoscan-yolo-api
-    runtime: python
-    rootDir: backend
-    plan: standard
-    buildCommand: pip install -r requirements.txt && python download_model.py
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
+    runtime: docker
+    plan: free
+
+    dockerfilePath: ./Dockerfile
+
     healthCheckPath: /health
+
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
       - key: DEVICE
         value: cpu
+
       - key: CONFIDENCE
         value: "0.35"
+
       - key: IOU
         value: "0.45"
+
       - key: IMG_SIZE
         value: "512"
+
       - key: ALLOWED_ORIGIN
         value: "*"

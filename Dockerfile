@@ -1,18 +1,73 @@
 FROM python:3.11-slim
 
+# ============================================================
+# SISTEMA
+# ============================================================
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# ============================================================
+# DEPENDÊNCIAS PYTHON
+# ============================================================
+
+COPY backend/requirements.txt ./requirements.txt
+
+RUN pip install \
+    --no-cache-dir \
+    --upgrade pip \
+    && pip install \
+    --no-cache-dir \
+    -r requirements.txt
+
+
+# ============================================================
+# YOLOV7
+# ============================================================
 
 COPY backend/GreenSorter ./GreenSorter
-COPY backend/app.py backend/download_model.py ./
+
+
+# ============================================================
+# BACKEND
+# ============================================================
+
+COPY backend/app.py ./app.py
+COPY backend/download_model.py ./download_model.py
+
+
+# ============================================================
+# BAIXAR MODELO
+# ============================================================
 
 RUN python download_model.py
+
+
+# ============================================================
+# CONFIGURAÇÕES
+# ============================================================
 
 ENV DEVICE=cpu
 ENV CONFIDENCE=0.35
 ENV IOU=0.45
 ENV IMG_SIZE=512
 
-CMD uvicorn app:app --host 0.0.0.0 --port ${PORT:-10000} --workers 1
+
+# ============================================================
+# PORTA
+# ============================================================
+
+EXPOSE 10000
+
+
+# ============================================================
+# START
+# ============================================================
+
+CMD uvicorn app:app \
+    --host 0.0.0.0 \
+    --port ${PORT:-10000} \
+    --workers 1
