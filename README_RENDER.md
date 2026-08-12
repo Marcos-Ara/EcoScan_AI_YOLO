@@ -1,62 +1,100 @@
-# EcoScan AI — versão leve para Render Free
+# EcoScan AI — Deploy com ONNX
 
-Esta versão mantém o GreenSorter, mas muda a arquitetura de produção:
-
-- `model.pt` é baixado somente no estágio de build.
-- PyTorch/YOLOv7 são usados somente para converter o modelo.
-- O estágio final contém apenas `model.onnx`, FastAPI, OpenCV e ONNX Runtime.
-- `IMG_SIZE=224`.
-- Uma única inferência por vez.
-- Limite de arquivo e resolução.
-- Timeout de lock para evitar requisições presas.
-- Limpeza de objetos temporários com `gc`.
-- Frontend envia frames menores e mais espaçados.
-- O frontend também possui **Selecionar imagem** para testar uma foto diretamente.
-
-## Deploy
-
-O `render.yaml` já está configurado para `plan: free`.
-
-Faça push de todos os arquivos:
-
-```bash
-git add .
-git commit -m "feat: runtime ONNX leve para Render Free"
-git push
-```
-
-No Render, confirme que não existe uma variável externa `IMG_SIZE=320` ou `IMG_SIZE=512`. O projeto usa `224`.
-
-## O que esperar do primeiro build
-
-O build instala PyTorch apenas no estágio temporário e converte:
-
-`model.pt` → `model.onnx`
-
-O container final NÃO instala PyTorch.
-
-No log do serviço, o runtime deve mostrar:
+A arquitetura de produção é:
 
 ```text
-[EcoScan] Runtime: CPU / 1 thread
-[EcoScan] ONNX carregado
+GitHub Pages
+    ↓ HTTPS
+Frontend EcoScan
+    ↓ HTTPS /predict
+Render
+    ↓
+FastAPI + ONNX Runtime
+    ↓
+GreenSorter YOLOv7 convertido para ONNX
 ```
 
-E `/health` deve retornar:
+## O que acontece no build
 
-```json
-{
-  "ok": true,
-  "model_loaded": true,
-  "model": "GreenSorter ONNX",
-  "runtime": "onnxruntime",
-  "device": "cpu",
-  "img_size": 224
-}
+O Docker usa duas etapas:
+
+1. **Builder**: instala PyTorch + YOLOv7, baixa `model.pt` e executa `convert_model.py`.
+2. **Runtime**: instala apenas FastAPI, OpenCV, NumPy e ONNX Runtime e recebe somente `model.onnx`.
+
+O runtime não carrega PyTorch nem o código YOLOv7.
+
+## Conversão local
+
+Dentro de `backend`:
+
+```powershell
+python download_model.py
+python convert_model.py
 ```
 
-## Teste
+Se o ambiente virtual estiver na raiz do projeto e você estiver dentro de `backend`, também pode usar:
 
-Abra `/docs` e use `POST /predict` com uma imagem.
+```powershell
+& "..\.venv\Scripts\python.exe" download_model.py
+& "..\.venv\Scripts\python.exe" convert_model.py
+```
 
-Depois teste o frontend. Na tela de Scan, além da câmera, existe o botão **Selecionar imagem**.
+A conversão deve terminar com:
+
+```text
+[EcoScan] Dry-run OK: (1, N, 9)
+[EcoScan] ONNX Runtime OK: inferência de teste concluída.
+[EcoScan] CONVERSÃO CONCLUÍDA COM SUCESSO
+```
+
+O `N` depende do tamanho da entrada. Com `IMG_SIZE=224`, o YOLOv7 GreenSorter normalmente produz 3087 candidatos.
+
+## Erro `Import "models..."` no VS Code
+
+O YOLOv7 original usa imports absolutos como `models.*` e `utils.*`. O projeto mantém esse comportamento porque o checkpoint também depende desses nomes.
+
+O arquivo `pyrightconfig.json` já informa ao Pylance que:
+
+```text
+backend/GreenSorter/yolov7
+```
+
+é um caminho de importação.
+
+Se o aviso continuar no VS Code, faça:
+
+1. `Ctrl + Shift + P`
+2. `Python: Restart Language Server`
+3. ou `Developer: Reload Window`
+
+O import correto continua sendo:
+
+```python
+from models.experimental import attempt_load
+```
+
+Não troque para um import relativo do pacote, porque o código original do YOLOv7 usa `models` e `utils` como módulos de topo.
+
+## API
+
+Depois de iniciar:
+
+```text
+http://127.0.0.1:8000/
+http://127.0.0.1:8000/health
+http://127.0.0.1:8000/docs
+```
+
+`POST /predict` recebe uma imagem no campo `file`.
+
+## Render
+
+O `render.yaml` aponta para o `Dockerfile`. A conversão acontece durante o build, portanto `model.pt` não precisa estar no estágio final do container.
+
+Antes do deploy, confira a URL em `config.js`:
+
+```js
+window.ECOSCAN_API_BASE = 'https://SEU-ENDERECO.onrender.com';
+```
+
+Não use `localhost` nessa configuração quando o frontend estiver no GitHub Pages.

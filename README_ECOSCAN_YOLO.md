@@ -5,8 +5,8 @@
 O projeto deixou de usar COCO-SSD para classificação de resíduos. Agora:
 
 1. A câmera continua sendo aberta pelo navegador.
-2. O navegador reduz cada frame para até 640 px e envia JPEG para a API local.
-3. A API carrega o `model.pt` do GreenSorter/YOLOv7 uma única vez.
+2. O navegador reduz cada frame para até 320 px e envia JPEG para a API local.
+3. O build converte o `model.pt` do GreenSorter/YOLOv7 para ONNX. A API carrega `model.onnx` uma única vez.
 4. O YOLO detecta `cardboard`, `metal`, `rigid_plastic` e `soft_plastic`.
 5. O backend converte essas classes para:
    - cardboard -> Papel -> 🔵 Azul
@@ -29,22 +29,18 @@ As regras dessas três categorias já estão preparadas no código para a próxi
 
 ### 1. Modelo
 
-Execute no PowerShell:
+Entre na pasta `backend` e execute:
 
 ```powershell
-cd backend
-.\setup_model.ps1
+python download_model.py
 ```
 
-O script clona o GreenSorter e cria o ambiente Python.
+O projeto baixa automaticamente o `model.pt` oficial do release `v0.1` e valida se o arquivo recebido é um checkpoint PyTorch válido.
 
-O README do GreenSorter informa que o `model.pt` é baixado separadamente. Baixe-o pelo próprio projeto:
-https://github.com/1nfinityLoop/GreenSorter
-
-Coloque o arquivo em:
+O arquivo fica em:
 
 ```text
-backend/model/model.pt
+backend/model.pt
 ```
 
 ### 2. Backend
@@ -95,13 +91,13 @@ O código antigo tinha regras como `bottle -> Vidro`, mas uma garrafa pode ser d
 O mapeamento antigo dependia de nomes de objetos que não representavam corretamente o material.
 
 ### 3. Câmera e IA estavam acopladas ao COCO-SSD
-Agora o detector é uma API YOLO local, permitindo usar o modelo treinado do GreenSorter.
+Agora o detector é uma API ONNX local/remota, usando os pesos treinados do GreenSorter.
 
 ### 4. Loop de detecção sem controle de rede
 Agora o frontend controla o intervalo e envia frames reduzidos, evitando mandar 1080p/30 FPS para o backend.
 
 ### 5. O modelo não é recarregado a cada frame
-O backend carrega `model.pt` uma única vez no startup.
+O backend carrega `model.onnx` uma única vez no startup.
 
 ### 6. Escala das caixas
 O backend recebe o frame reduzido, mas devolve as caixas e o frontend converte para a resolução do vídeo antes de desenhar.

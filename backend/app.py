@@ -147,9 +147,42 @@ except Exception as exc:
 
 load_time = time.perf_counter() - load_start
 
-input_meta = session.get_inputs()[0]
+inputs = session.get_inputs()
+outputs = session.get_outputs()
+
+if not inputs:
+    raise RuntimeError("Modelo ONNX não possui entrada.")
+
+if not outputs:
+    raise RuntimeError("Modelo ONNX não possui saída.")
+
+input_meta = inputs[0]
 INPUT_NAME = input_meta.name
-OUTPUT_NAMES = [item.name for item in session.get_outputs()]
+OUTPUT_NAMES = [item.name for item in outputs]
+
+output_shape = outputs[0].shape
+if len(output_shape) == 3:
+    output_values = output_shape[-1]
+    if isinstance(output_values, int) and output_values != 9:
+        raise RuntimeError(
+            "Saída ONNX incompatível com o GreenSorter de 4 classes: "
+            f"shape={output_shape}. Esperado [1,N,9]."
+        )
+
+# O export é estático em 224x224. Se alguém configurar outro tamanho
+# no ambiente, é melhor falhar no startup do que enviar um tensor que
+# o ONNX não aceita.
+input_shape = input_meta.shape
+if len(input_shape) == 4:
+    static_h = input_shape[2]
+    static_w = input_shape[3]
+    if isinstance(static_h, int) and isinstance(static_w, int):
+        if static_h != IMG_SIZE or static_w != IMG_SIZE:
+            raise RuntimeError(
+                "IMG_SIZE incompatível com o modelo ONNX: "
+                f"ambiente={IMG_SIZE}, modelo={static_h}x{static_w}. "
+                "Use o mesmo tamanho usado na conversão."
+            )
 
 print(f"[EcoScan] ONNX carregado em {load_time:.2f}s", flush=True)
 print(f"[EcoScan] Input: {INPUT_NAME} shape={input_meta.shape}", flush=True)

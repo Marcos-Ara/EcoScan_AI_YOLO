@@ -1,230 +1,225 @@
-# EcoScan AI — Base completa auditada
+# EcoScan AI — GreenSorter YOLOv7 + ONNX
 
-Esta é a base preparada para o fluxo:
+Base do EcoScan AI com câmera no navegador e detecção de resíduos usando os pesos oficiais do GreenSorter.
 
-```text
-Celular
-  ↓ HTTPS
-GitHub Pages
-  ↓ HTTPS
-Render
-  ↓
-FastAPI
-  ↓
-GreenSorter YOLOv7
-  ↓
-Papel / Plástico / Metal
-```
+## Classes reais do modelo
 
-## Auditoria feita
+O modelo usado neste projeto possui quatro classes:
 
-### Frontend
-- câmera independente do backend;
-- funciona em HTTPS/GitHub Pages;
-- API configurável por `config.js`;
-- detector não fica disparando requisições em alta frequência quando a API falha;
-- frames enviados em largura reduzida;
-- tratamento de câmera/permissão;
-- canvas de detecção;
-- histórico, estatísticas e interface preservados.
-
-### Backend
-- FastAPI;
-- `/`;
-- `/health`;
-- `/predict`;
-- CORS;
-- validação de imagem;
-- limite de tamanho do upload;
-- YOLOv7 GreenSorter;
-- `model.pt` baixado automaticamente;
-- CPU;
-- um único worker para não carregar o modelo várias vezes.
-
-### Deploy
-- `render.yaml`;
-- `Dockerfile` como alternativa;
-- Python 3.11.11 fixado;
-- `.gitignore` para não enviar `model.pt`;
-- modelo oficial baixado no build.
-
-## Classes dos pesos atuais
-
-Os pesos oficiais do GreenSorter são para quatro classes:
-
-| Classe | EcoScan | Lixeira |
+| Classe GreenSorter | Categoria EcoScan | Lixeira |
 |---|---|---|
-| cardboard | Papel | 🔵 Azul |
-| rigid_plastic | Plástico | 🔴 Vermelha |
-| soft_plastic | Plástico | 🔴 Vermelha |
-| metal | Metal | 🟡 Amarela |
+| `cardboard` | Papel | 🔵 Azul |
+| `metal` | Metal | 🟡 Amarela |
+| `rigid_plastic` | Plástico | 🔴 Vermelha |
+| `soft_plastic` | Plástico | 🔴 Vermelha |
 
-Ainda NÃO existe detecção real para:
+Vidro, orgânico e rejeito aparecem apenas como regras preparadas no frontend/backend; eles **não são classes detectadas pelos pesos atuais**.
 
-- vidro 🟢;
-- orgânico 🟤;
-- rejeito ⚫.
-
-Essas três serão adicionadas por fine-tuning depois. Não serão falsamente mapeadas.
-
-## Modelo
-
-O release oficial do GreenSorter `v0.1` contém `model.pt`, com 74,768,207 bytes. O build do Render baixa esse arquivo automaticamente.
-
-## IMPORTANTE: Render
-
-O plano Free do Render tem 512 MB RAM e 0,1 CPU. YOLOv7 + PyTorch é pesado demais para tratar o Free como configuração confiável.
-
-Por isso o `render.yaml` usa:
-
-```yaml
-plan: standard
-```
-
-A configuração Standard tem 2 GB RAM e 1 CPU.
-
-O Free pode ser usado apenas como tentativa de teste, mas não é a configuração que devemos considerar "pronta para funcionar".
-
-## Passo 1 — GitHub
-
-Envie TODOS os arquivos desta pasta para:
-
-`Marcos-Ara/EcoScan_AI_YOLO_GreenSorter`
-
-Não envie um arquivo ZIP dentro do repositório. O conteúdo do ZIP deve ser a raiz do projeto.
-
-Depois confira se o GitHub mostra:
+## Estrutura
 
 ```text
-index.html
-script.js
-styles.css
-config.js
-render.yaml
-Dockerfile
-backend/
+EcoScan_AI_YOLO_GreenSorter/
+├── index.html
+├── script.js
+├── styles.css
+├── config.js
+├── Dockerfile
+├── render.yaml
+├── pyrightconfig.json
+└── backend/
+    ├── app.py
+    ├── convert_model.py
+    ├── download_model.py
+    ├── requirements.txt
+    ├── requirements-build.txt
+    ├── requirements-local.txt
+    ├── start_backend.ps1
+    ├── model.pt
+    ├── model.onnx
+    └── GreenSorter/
+        └── yolov7/
+            ├── models/
+            └── utils/
 ```
 
-## Passo 2 — Render
+## 1. Ambiente local
 
-No Render:
+O projeto usa Python 3.11.
 
-1. New → Blueprint.
-2. Conecte o GitHub.
-3. Escolha `Marcos-Ara/EcoScan_AI_YOLO_GreenSorter`.
-4. O Render deve ler `render.yaml`.
-5. Confirme o serviço `ecoscan-yolo-api`.
-6. Faça o deploy.
-7. Aguarde o build baixar `model.pt`.
-8. Abra:
+Se o `.venv` estiver na raiz do projeto:
 
-`https://SEU-ENDERECO.onrender.com/health`
-
-O resultado esperado é:
-
-```json
-{
-  "ok": true,
-  "model_loaded": true,
-  "model": "GreenSorter YOLOv7"
-}
+```powershell
+.\.venv\Scripts\Activate.ps1
 ```
 
-## Passo 3 — Frontend
+Dentro de `backend`, com o ambiente ativado:
 
-Depois de saber a URL REAL do Render, altere somente:
-
-```js
-window.ECOSCAN_API_BASE = 'https://SEU-ENDERECO.onrender.com';
+```powershell
+python -m pip install -r requirements-local.txt
+python download_model.py
+python convert_model.py
 ```
 
-em `config.js`.
+> Se o PowerShell estiver em `backend` e o `.venv` estiver na pasta pai, o caminho explícito é `..\.venv\Scripts\python.exe`.
 
-Faça commit/push.
+### Dependências
 
-## Passo 4 — GitHub Pages
+- `requirements-local.txt`: ambiente local completo, incluindo PyTorch/YOLOv7 para conversão.
+- `requirements-build.txt`: dependências usadas no estágio de build do Docker.
+- `requirements.txt`: somente runtime da API; não instala PyTorch.
 
-Abra o GitHub Pages.
+## 2. Verificar o modelo
 
-O navegador precisa estar em HTTPS para usar a câmera.
+O `model.pt` oficial tem aproximadamente 71,3 MiB / 74.768.207 bytes.
 
-Ao abrir a câmera:
+Para validar:
 
-```text
-📷 Câmera ativa • 🤖 YOLO conectado
-```
-
-Se aparecer:
-
-```text
-📷 Câmera ativa • ⚠️ detector offline
-```
-
-a câmera está correta; o problema passa a ser exclusivamente a API/URL/Render.
-
-## Passo 5 — Teste do backend
-
-Antes de testar a câmera, sempre teste:
-
-```text
-GET /health
+```powershell
+python download_model.py
 ```
 
 Depois:
 
-```text
-GET /docs
+```powershell
+python -c "import sys; sys.path.insert(0, 'GreenSorter/yolov7'); import torch; m=torch.load('model.pt', map_location='cpu', weights_only=False); print('MODELO OK'); print(type(m))"
 ```
 
-E por último:
+O resultado esperado começa com:
 
 ```text
-POST /predict
+MODELO OK
+<class 'dict'>
 ```
 
-## Ordem que devemos seguir
+## 3. Converter para ONNX
 
-Não pule etapas:
+Execute:
 
-1. colocar a base no GitHub;
-2. conferir arquivos no GitHub;
-3. criar o serviço no Render;
-4. aguardar build;
-5. testar `/health`;
-6. testar `/docs`;
-7. configurar `config.js`;
-8. atualizar GitHub Pages;
-9. abrir no celular;
-10. testar câmera;
-11. testar uma caixa/papel;
-12. testar plástico;
-13. testar metal;
-14. medir velocidade;
-15. otimizar;
-16. só depois fazer fine-tuning para vidro, orgânico e rejeito.
+```powershell
+python convert_model.py
+```
 
-## Observação sobre velocidade
+A conversão agora verifica:
 
-O backend está preparado para validar o funcionamento primeiro. YOLOv7 em CPU e hospedagem comum não é uma solução ideal para 7 frames por segundo.
+- existência e assinatura do `model.pt`;
+- import do YOLOv7;
+- carregamento do checkpoint;
+- configuração correta da camada Detect;
+- dry-run com saída `[1, N, 9]`;
+- exportação ONNX para arquivo temporário;
+- validação estrutural com `onnx`;
+- carregamento pelo ONNX Runtime;
+- inferência real de teste;
+- publicação de `model.onnx` somente depois das validações.
 
-Por isso o frontend começa em aproximadamente 1 detecção por segundo e envia frames de até 512 px. Depois que a cadeia inteira estiver funcionando, podemos otimizar a inferência sem quebrar a câmera.
+### Importante sobre `models.experimental`
 
-## Segurança
+O código correto é:
 
-Durante o primeiro teste:
+```python
+from models.experimental import attempt_load
+```
+
+O YOLOv7 deste projeto usa imports absolutos (`models.*` e `utils.*`). O `convert_model.py` coloca `backend/GreenSorter/yolov7` no `sys.path` antes do import e o `pyrightconfig.json` informa esse caminho ao Pylance.
+
+O aviso amarelo do Pylance é diferente de um erro de execução. Depois de recarregar o Language Server, o import deve deixar de aparecer como `reportMissingImports`.
+
+## 4. Rodar a API
+
+A forma mais simples é:
+
+```powershell
+cd backend
+.\start_backend.ps1
+```
+
+O script:
+
+1. cria o `.venv` do backend se necessário;
+2. instala as dependências;
+3. valida/baixa `model.pt`;
+4. converte para `model.onnx` se necessário;
+5. inicia o FastAPI em `http://127.0.0.1:8000`.
+
+Teste:
 
 ```text
-ALLOWED_ORIGIN=*
+http://127.0.0.1:8000/health
+http://127.0.0.1:8000/docs
 ```
 
-Depois que o GitHub Pages estiver confirmado, podemos trocar para o domínio exato do Pages e restringir o CORS.
+## 5. Frontend
 
-## O que NÃO deve entrar no GitHub
+Em outro terminal:
+
+```powershell
+.\start_frontend.ps1
+```
+
+Abra:
 
 ```text
-backend/model.pt
+http://127.0.0.1:5500
 ```
 
-O `.gitignore` já impede isso.
+Para produção, configure em `config.js` a URL HTTPS real da API do Render.
 
-O modelo é baixado pelo Render durante o build.
+## 6. Docker / Render
+
+O `Dockerfile` faz a conversão no estágio builder e deixa somente o ONNX no runtime.
+
+```text
+builder
+  ├── model.pt
+  ├── PyTorch
+  └── YOLOv7
+       ↓
+   model.onnx
+       ↓
+runtime
+  ├── FastAPI
+  ├── OpenCV
+  ├── NumPy
+  └── ONNX Runtime
+```
+
+Isso evita carregar PyTorch/YOLOv7 no servidor final.
+
+## 7. Diagnóstico rápido
+
+### `Import "models.experimental" could not be resolved`
+
+No VS Code:
+
+```text
+Ctrl + Shift + P
+→ Python: Restart Language Server
+```
+
+O projeto já contém `pyrightconfig.json` com o caminho correto.
+
+### `Modelo não encontrado: ...\backend\model.pt`
+
+Execute:
+
+```powershell
+python download_model.py
+```
+
+### `_pickle.UnpicklingError: could not find MARK`
+
+Isso significa que `model.pt` não era um checkpoint PyTorch válido. Se o arquivo começar com texto como `import os`, ele está errado. Execute novamente:
+
+```powershell
+python download_model.py
+```
+
+### `ModuleNotFoundError: No module named 'models'`
+
+Não execute `torch.load('model.pt')` puro fora da raiz do YOLOv7. Para teste manual:
+
+```powershell
+python -c "import sys; sys.path.insert(0, 'GreenSorter/yolov7'); import torch; m=torch.load('model.pt', map_location='cpu', weights_only=False); print('MODELO OK')"
+```
+
+O `convert_model.py` já faz isso automaticamente.

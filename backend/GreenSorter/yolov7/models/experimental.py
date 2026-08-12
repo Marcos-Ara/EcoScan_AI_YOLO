@@ -249,9 +249,15 @@ def attempt_load(weights, map_location=None):
 
         attempt_download(w)
 
+        # PyTorch 2.6+ mudou o padrão de torch.load para weights_only=True.
+        # O checkpoint oficial do GreenSorter é confiável e contém o objeto
+        # completo do modelo YOLOv7, então precisamos carregar com
+        # weights_only=False. Isso também continua compatível com
+        # PyTorch 2.1.x usado pelo projeto.
         ckpt = torch.load(
             w,
-            map_location=map_location
+            map_location=map_location,
+            weights_only=False,
         )
 
         loaded_model = ckpt[
