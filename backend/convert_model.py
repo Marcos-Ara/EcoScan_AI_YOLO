@@ -2,6 +2,7 @@ import gc
 import os
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 # ============================================================
 # EcoScan AI - YOLOv7 -> ONNX
@@ -80,7 +81,7 @@ configure_yolov7_imports()
 # O Pylance encontra este módulo através do pyrightconfig.json
 # existente na raiz do projeto. Em execução, o sys.path acima
 # resolve os imports absolutos usados pelo YOLOv7.
-from models.experimental import attempt_load
+from models.experimental import attempt_load  # pyright: ignore[reportMissingImports]
 
 
 # ============================================================
@@ -97,7 +98,7 @@ def force_cleanup() -> None:
         pass
 
 
-def fail(message: str) -> None:
+def fail(message: str) -> NoReturn:
     raise RuntimeError(f"[EcoScan] {message}")
 
 
@@ -150,10 +151,6 @@ def extract_prediction_tensor(value):
         f"Tipo recebido: {type(value).__name__}"
     )
 
-
-def describe_prediction(value) -> tuple:
-    tensor = extract_prediction_tensor(value)
-    return tuple(tensor.shape)
 
 
 # ============================================================
@@ -296,8 +293,10 @@ def main() -> None:
         )
 
     except Exception:
-        del dummy
-        del model
+        # Não usamos del aqui: além de desnecessário, isso fazia o
+        # Pylance considerar `dummy` e `model` possivelmente indefinidos
+        # no restante da função. Como a exceção é relançada, as referências
+        # serão liberadas quando main() terminar.
         force_cleanup()
         raise
 
@@ -327,8 +326,6 @@ def main() -> None:
         )
     except Exception as exc:
         ONNX_TEMP_PATH.unlink(missing_ok=True)
-        del dummy
-        del model
         force_cleanup()
         fail(
             "Falha durante a exportação ONNX. "
