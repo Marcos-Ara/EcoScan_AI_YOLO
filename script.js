@@ -106,7 +106,7 @@ const DETECTION_INTERVAL_MS = 2500;
 
 const MIN_CONFIDENCE = 0.35;
 
-const MAX_BOXES = 5;
+const MAX_BOXES = 1;
 
 const MAX_FRAME_WIDTH = 320;
 

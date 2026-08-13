@@ -1,0 +1,13 @@
+EcoScan AI — pacote fonte final (modo foco)
+
+Verificações realizadas antes do pacote:
+- Python: app.py, convert_model.py e download_model.py compilados sem erro de sintaxe.
+- JavaScript: script.js passou em node --check.
+- Estrutura: Dockerfile, requirements de runtime/build, app.py, convert_model.py, download_model.py e GreenSorter/yolov7 presentes.
+- Modo foco: FOCUS_MODE=true, FOCUS_CROP_RATIO=0.90, FOCUS_MAX_DETECTIONS=1.
+- Frontend: MAX_BOXES=1.
+- model.pt e model.onnx NÃO são incluídos porque são artefatos gerados pelo Docker build; o Dockerfile baixa/converte o modelo durante o build.
+- .git, venv e caches NÃO são incluídos para reduzir o tamanho do download.
+
+Importante:
+O modo foco reduz influência do fundo e força uma única detecção, mas não retraina o peso GreenSorter. Se um objeto metálico isolado continuar sendo classificado como cardboard, isso indica limitação do modelo/dataset e não do Docker/ONNX.

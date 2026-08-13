@@ -177,6 +177,12 @@ ENV MAX_FILE_SIZE=1500000
 ENV MAX_IMAGE_DIMENSION=960
 ENV MAX_DETECTIONS=20
 
+# Modo de uso: um objeto por vez, priorizando a região central.
+ENV FOCUS_MODE=true
+ENV FOCUS_CROP_RATIO=0.90
+ENV FOCUS_MAX_DETECTIONS=1
+ENV DEBUG_PREDICTIONS=false
+
 
 # ============================================================
 # DIRETÓRIO

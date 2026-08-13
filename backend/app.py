@@ -54,6 +54,34 @@ MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "1500000"))
 MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "960"))
 MAX_DETECTIONS = int(os.getenv("MAX_DETECTIONS", "20"))
 
+# Modo de foco: o modelo recebe apenas uma região central da imagem.
+# Isso reduz falsos positivos do fundo e força o uso em um único objeto.
+FOCUS_MODE = os.getenv("FOCUS_MODE", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+FOCUS_CROP_RATIO = float(
+    os.getenv("FOCUS_CROP_RATIO", "0.90")
+)
+FOCUS_CROP_RATIO = min(
+    1.0,
+    max(0.55, FOCUS_CROP_RATIO)
+)
+
+# Em modo de foco, retornamos apenas a melhor detecção.
+FOCUS_MAX_DETECTIONS = int(
+    os.getenv("FOCUS_MAX_DETECTIONS", "1")
+)
+FOCUS_MAX_DETECTIONS = max(
+    1,
+    min(3, FOCUS_MAX_DETECTIONS)
+)
+
+DEBUG_PREDICTIONS = os.getenv(
+    "DEBUG_PREDICTIONS", "false"
+).lower() in {
+    "1", "true", "yes", "on"
+}
+
 # Uma única inferência por vez.
 INFERENCE_LOCK = threading.Lock()
 
@@ -124,6 +152,8 @@ print(f"[EcoScan] Confidence: {CONFIDENCE}", flush=True)
 print(f"[EcoScan] IoU: {IOU}", flush=True)
 print(f"[EcoScan] Max file size: {MAX_FILE_SIZE} bytes", flush=True)
 print(f"[EcoScan] Max image dimension: {MAX_IMAGE_DIMENSION}px", flush=True)
+print(f"[EcoScan] Focus mode: {FOCUS_MODE} ({FOCUS_CROP_RATIO:.2f})", flush=True)
+print(f"[EcoScan] Focus max detections: {FOCUS_MAX_DETECTIONS}", flush=True)
 
 session_options = ort.SessionOptions()
 session_options.intra_op_num_threads = 1
@@ -245,7 +275,157 @@ def health():
         "max_file_size": MAX_FILE_SIZE,
         "max_image_dimension": MAX_IMAGE_DIMENSION,
         "inference_lock": "enabled",
+        "focus_mode": FOCUS_MODE,
+        "focus_crop_ratio": FOCUS_CROP_RATIO,
+        "focus_max_detections": FOCUS_MAX_DETECTIONS,
+        "debug_predictions": DEBUG_PREDICTIONS,
     }
+
+
+# ============================================================
+# MODO DE FOCO
+# ============================================================
+
+def center_crop(
+    image: np.ndarray,
+    crop_ratio: float,
+):
+    """
+    Recorta uma região central quadrada.
+    Retorna:
+      crop, offset_x, offset_y
+    """
+    h, w = image.shape[:2]
+
+    if h <= 0 or w <= 0:
+        raise ValueError("Imagem sem dimensões válidas.")
+
+    side = int(
+        round(
+            min(h, w) * crop_ratio
+        )
+    )
+
+    side = max(
+        32,
+        min(side, h, w)
+    )
+
+    x0 = max(
+        0,
+        (w - side) // 2
+    )
+
+    y0 = max(
+        0,
+        (h - side) // 2
+    )
+
+    x1 = min(
+        w,
+        x0 + side
+    )
+
+    y1 = min(
+        h,
+        y0 + side
+    )
+
+    crop = image[
+        y0:y1,
+        x0:x1
+    ].copy()
+
+    return crop, x0, y0
+
+
+def select_focus_predictions(
+    predictions,
+    image_shape,
+):
+    """
+    Seleciona somente as melhores detecções em modo de foco.
+
+    Dá pequeno peso à proximidade do centro para evitar que
+    uma detecção menor nas bordas do recorte seja escolhida
+    no lugar do objeto central.
+    """
+    if not predictions:
+        return []
+
+    h, w = image_shape[:2]
+
+    cx_target = w / 2.0
+    cy_target = h / 2.0
+
+    diag = max(
+        1.0,
+        (w * w + h * h) ** 0.5
+    )
+
+    ranked = []
+
+    for item in predictions:
+        bbox = item.get("bbox")
+
+        if not bbox or len(bbox) < 4:
+            continue
+
+        x, y, bw, bh = [
+            float(value)
+            for value in bbox[:4]
+        ]
+
+        center_x = x + bw / 2.0
+        center_y = y + bh / 2.0
+
+        distance = (
+            (
+                (center_x - cx_target) ** 2
+                + (center_y - cy_target) ** 2
+            ) ** 0.5
+        ) / diag
+
+        score = float(
+            item.get("score", 0.0)
+        )
+
+        # Mantém a confiança dominante e usa a posição
+        # apenas como desempate suave.
+        focus_score = (
+            score
+            * (
+                1.0
+                - min(
+                    0.30,
+                    distance * 0.30
+                )
+            )
+        )
+
+        ranked.append(
+            (
+                focus_score,
+                score,
+                item
+            )
+        )
+
+    ranked.sort(
+        key=lambda value: (
+            value[0],
+            value[1]
+        ),
+        reverse=True
+    )
+
+    return [
+        item
+        for _, _, item
+        in ranked[
+            :FOCUS_MAX_DETECTIONS
+        ]
+    ]
 
 
 # ============================================================
@@ -699,8 +879,37 @@ async def predict(file: UploadFile = File(...)):
                 flush=True,
             )
 
+        # ----------------------------------------------------
+        # MODO DE FOCO
+        # ----------------------------------------------------
+        # Por padrão usamos somente a região central.
+        # Isso reduz a influência de objetos/background nas bordas
+        # e funciona melhor para o uso "um objeto por vez".
+        inference_frame = frame
+        focus_offset_x = 0
+        focus_offset_y = 0
+
+        if FOCUS_MODE:
+            (
+                inference_frame,
+                focus_offset_x,
+                focus_offset_y,
+            ) = center_crop(
+                frame,
+                FOCUS_CROP_RATIO,
+            )
+
+            print(
+                f"[EcoScan][{request_id}] "
+                f"FOCUS crop: "
+                f"{inference_frame.shape[1]}x"
+                f"{inference_frame.shape[0]} "
+                f"offset=({focus_offset_x},{focus_offset_y})",
+                flush=True,
+            )
+
         input_tensor, ratio, pad_x, pad_y = prepare_input(
-            frame
+            inference_frame
         )
 
         print(
@@ -761,11 +970,31 @@ async def predict(file: UploadFile = File(...)):
 
         results = decode_predictions(
             output,
-            frame.shape,
+            inference_frame.shape,
             ratio,
             pad_x,
             pad_y,
         )
+
+        if FOCUS_MODE:
+            for item in results:
+                bbox = item.get("bbox")
+
+                if bbox and len(bbox) >= 4:
+                    bbox[0] += int(focus_offset_x)
+                    bbox[1] += int(focus_offset_y)
+
+            results = select_focus_predictions(
+                results,
+                frame.shape,
+            )
+
+        if DEBUG_PREDICTIONS:
+            print(
+                f"[EcoScan][{request_id}] "
+                f"Predições finais: {results}",
+                flush=True,
+            )
 
         total_time = (
             time.perf_counter()
