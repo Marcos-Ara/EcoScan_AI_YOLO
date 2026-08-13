@@ -2277,19 +2277,17 @@ function updateDetectionCard(
       )
       .sort(
         (a, b) =>
-          b.score - a.score
+          Number(b.score) -
+          Number(a.score)
       );
-
 
   const best =
     valid[0];
-
 
   if (!best) {
 
     lastDetectionData =
       null;
-
 
     setDetectionCard({
 
@@ -2315,23 +2313,121 @@ function updateDetectionCard(
 
     });
 
-
     return;
 
   }
 
+  const categoryKey =
+    best.category_key ||
+    normalizeKey(
+      best.category
+    );
 
   const rule =
     WASTE_RULES[
-      best.category
+      categoryKey
     ];
 
-
   if (!rule) {
+
+    console.warn(
+      '[EcoScan] Regra não encontrada:',
+      {
+        category: best.category,
+        category_key: best.category_key,
+        source_class: best.source_class
+      }
+    );
+
+    lastDetectionData =
+      null;
+
+    setDetectionCard({
+
+      name:
+        prettifyClassName(
+          best.source_class
+        ),
+
+      category:
+        best.category ||
+        'Indeterminado',
+
+      bin:
+        best.bin ||
+        '-',
+
+      dest:
+        best.destination ||
+        '-',
+
+      time:
+        best.decomposition ||
+        '-',
+
+      fact:
+        'Objeto reconhecido pelo modelo, mas sem regra de reciclagem cadastrada.'
+
+    });
 
     return;
 
   }
+
+  lastDetectionData = {
+
+    name:
+      prettifyClassName(
+        best.source_class
+      ),
+
+    category:
+      rule.category,
+
+    bin:
+      rule.bin,
+
+    dest:
+      rule.dest,
+
+    time:
+      rule.time,
+
+    fact:
+      rule.fact,
+
+    confidence:
+      Number(
+        best.score
+      ),
+
+    sourceClass:
+      best.source_class
+
+  };
+
+  setDetectionCard(
+    lastDetectionData
+  );
+
+}
+
+    const rule =
+      WASTE_RULES[
+        best.category_key ||
+        normalizeKey(best.category)
+      ];
+
+    if (!rule) {
+
+      console.warn(
+        'Regra não encontrada para:',
+        best
+      );
+
+      return;
+
+    }
 
 
   lastDetectionData = {
@@ -2370,8 +2466,6 @@ function updateDetectionCard(
   setDetectionCard(
     lastDetectionData
   );
-
-}
 
 
 function setDetectionCard(
