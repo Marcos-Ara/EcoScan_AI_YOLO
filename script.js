@@ -1,6 +1,6 @@
 // ============================================================
 // EcoScan AI
-// Frontend + Camera + YOLO API
+// Frontend + Camera + YOLO API + Firebase
 // ============================================================
 
 
@@ -138,16 +138,21 @@ let staticImageMode = false;
 let savedDetections = loadSavedDetections();
 
 let auth = null;
+
 let currentUser = null;
+
 let authReady = false;
 
-const firebaseConfig = window.ECOSCAN_FIREBASE_CONFIG || {};
+
+const firebaseConfig =
+  window.ECOSCAN_FIREBASE_CONFIG || {};
+
 
 initializeFirebase();
 
 
 // ============================================================
-// REGRAS
+// REGRAS DE RECICLAGEM
 // ============================================================
 
 const WASTE_RULES = {
@@ -164,6 +169,7 @@ const WASTE_RULES = {
 
     fact:
       'Papel e papelão devem estar, de preferência, secos e sem restos de comida.'
+
   },
 
 
@@ -179,6 +185,7 @@ const WASTE_RULES = {
 
     fact:
       'Garrafas PET, embalagens e outros plásticos devem ir para a coleta seletiva.'
+
   },
 
 
@@ -194,6 +201,7 @@ const WASTE_RULES = {
 
     fact:
       'Vidro deve ser encaminhado para a coleta seletiva.'
+
   },
 
 
@@ -209,6 +217,7 @@ const WASTE_RULES = {
 
     fact:
       'Latas, tampas e outros metais devem ser encaminhados para reciclagem.'
+
   },
 
 
@@ -224,6 +233,7 @@ const WASTE_RULES = {
 
     fact:
       'Restos de alimentos e cascas podem ser destinados à compostagem.'
+
   },
 
 
@@ -239,7 +249,83 @@ const WASTE_RULES = {
 
     fact:
       'Resíduos que não podem ser reciclados devem ser destinados aos rejeitos.'
+
   }
+
+};
+
+
+// ============================================================
+// ALIASES DO YOLO
+// ============================================================
+//
+// Alguns modelos podem retornar:
+//
+// cardboard
+// paper
+// paperboard
+// plastic
+// bottle
+// glass
+// metal
+//
+// enquanto o EcoScan usa:
+//
+// papel
+// plastico
+// vidro
+// metal
+//
+// Aqui fazemos a conversão.
+//
+
+const WASTE_ALIASES = {
+
+  // PAPEL
+  cardboard: 'papel',
+  card_board: 'papel',
+  paper: 'papel',
+  paperboard: 'papel',
+  paper_board: 'papel',
+  papel: 'papel',
+  papelao: 'papel',
+  papelao: 'papel',
+
+  // PLÁSTICO
+  plastic: 'plastico',
+  plastics: 'plastico',
+  plastico: 'plastico',
+  garrafa_plastica: 'plastico',
+  plastic_bottle: 'plastico',
+  bottle: 'plastico',
+  pet: 'plastico',
+
+  // VIDRO
+  glass: 'vidro',
+  vidro: 'vidro',
+  glass_bottle: 'vidro',
+
+  // METAL
+  metal: 'metal',
+  metals: 'metal',
+  lata: 'metal',
+  can: 'metal',
+  aluminum: 'metal',
+  aluminium: 'metal',
+
+  // ORGÂNICO
+  organic: 'organico',
+  organico: 'organico',
+  food: 'organico',
+  food_waste: 'organico',
+  resto_de_comida: 'organico',
+
+  // REJEITO
+  reject: 'rejeito',
+  rejeito: 'rejeito',
+  trash: 'rejeito',
+  garbage: 'rejeito',
+  waste: 'rejeito'
 
 };
 
@@ -287,30 +373,88 @@ function init() {
   );
 
 
-  loginForm?.addEventListener('submit', handleLogin);
-  registerForm?.addEventListener('submit', handleRegister);
+  loginForm?.addEventListener(
+    'submit',
+    handleLogin
+  );
 
-  goRegisterBtn?.addEventListener('click', () => {
-    clearAuthMessages();
-    navigateTo('registerScreen');
-  });
 
-  backToLoginBtn?.addEventListener('click', () => {
-    clearAuthMessages();
-    navigateTo('loginScreen');
-  });
+  registerForm?.addEventListener(
+    'submit',
+    handleRegister
+  );
 
-  forgotPasswordBtn?.addEventListener('click', handleForgotPassword);
-  googleLoginBtn?.addEventListener('click', handleGoogleSignIn);
-  googleRegisterBtn?.addEventListener('click', handleGoogleSignIn);
-  checkVerificationBtn?.addEventListener('click', checkEmailVerification);
-  resendVerificationBtn?.addEventListener('click', resendVerificationEmail);
-  verifyLogoutBtn?.addEventListener('click', handleLogout);
+
+  goRegisterBtn?.addEventListener(
+    'click',
+    () => {
+
+      clearAuthMessages();
+
+      navigateTo(
+        'registerScreen'
+      );
+
+    }
+  );
+
+
+  backToLoginBtn?.addEventListener(
+    'click',
+    () => {
+
+      clearAuthMessages();
+
+      navigateTo(
+        'loginScreen'
+      );
+
+    }
+  );
+
+
+  forgotPasswordBtn?.addEventListener(
+    'click',
+    handleForgotPassword
+  );
+
+
+  googleLoginBtn?.addEventListener(
+    'click',
+    handleGoogleSignIn
+  );
+
+
+  googleRegisterBtn?.addEventListener(
+    'click',
+    handleGoogleSignIn
+  );
+
+
+  checkVerificationBtn?.addEventListener(
+    'click',
+    checkEmailVerification
+  );
+
+
+  resendVerificationBtn?.addEventListener(
+    'click',
+    resendVerificationEmail
+  );
+
+
+  verifyLogoutBtn?.addEventListener(
+    'click',
+    handleLogout
+  );
 
 
   startScanBtn?.addEventListener(
     'click',
-    () => navigateTo('cameraScreen')
+    () =>
+      navigateTo(
+        'cameraScreen'
+      )
   );
 
 
@@ -319,10 +463,13 @@ function init() {
     saveCurrentDetection
   );
 
+
   selectImageBtn?.addEventListener(
     'click',
-    () => imageInput?.click()
+    () =>
+      imageInput?.click()
   );
+
 
   imageInput?.addEventListener(
     'change',
@@ -330,7 +477,10 @@ function init() {
   );
 
 
-  logoutBtn?.addEventListener('click', handleLogout);
+  logoutBtn?.addEventListener(
+    'click',
+    handleLogout
+  );
 
 
   themeSwitch?.addEventListener(
@@ -342,7 +492,9 @@ function init() {
   notifSwitch?.addEventListener(
     'click',
     () =>
-      notifSwitch.classList.toggle('on')
+      notifSwitch.classList.toggle(
+        'on'
+      )
   );
 
 
@@ -392,275 +544,963 @@ function initializeFirebase() {
 
   try {
 
-    if (!window.firebase) {
-      console.error('Firebase SDK não carregado.');
+    if (
+      !window.firebase ||
+      !window.firebase.auth
+    ) {
+
+      console.error(
+        'Firebase Auth SDK não foi carregado.'
+      );
+
+      setAuthMessage(
+        'loginMessage',
+        'O Firebase não foi carregado. Verifique sua internet e o index.html.',
+        'error'
+      );
+
       return;
+
     }
 
-    if (!firebaseConfig.apiKey || firebaseConfig.apiKey.includes('COLE_')) {
-      console.warn('Preencha o window.ECOSCAN_FIREBASE_CONFIG em config.js.');
+
+    if (
+      !firebaseConfig.apiKey ||
+      firebaseConfig.apiKey.includes(
+        'COLE_'
+      )
+    ) {
+
+      console.error(
+        'Firebase config incompleto:',
+        firebaseConfig
+      );
+
+      setAuthMessage(
+        'loginMessage',
+        'A configuração do Firebase está incompleta no config.js.',
+        'error'
+      );
+
       return;
+
     }
+
 
     if (!firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
+
+      firebase.initializeApp(
+        firebaseConfig
+      );
+
     }
 
-    auth = firebase.auth();
-    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
-    auth.onAuthStateChanged(async user => {
-      currentUser = user;
-      authReady = true;
+    auth =
+      firebase.auth();
 
-      if (!user) {
-        navigateTo('loginScreen');
-        updateUserUI(null);
-        return;
+
+    auth
+      .setPersistence(
+        firebase.auth.Auth.Persistence.LOCAL
+      )
+      .catch(
+        error =>
+          console.error(
+            'Não foi possível definir persistência da sessão:',
+            error
+          )
+      );
+
+
+    getRedirectResultSafe();
+
+
+    auth.onAuthStateChanged(
+      async user => {
+
+        currentUser =
+          user;
+
+        authReady =
+          true;
+
+
+        if (!user) {
+
+          navigateTo(
+            'loginScreen'
+          );
+
+          updateUserUI(
+            null
+          );
+
+          return;
+
+        }
+
+
+        updateUserUI(
+          user
+        );
+
+
+        if (
+          !user.emailVerified &&
+          user.providerData.some(
+            p =>
+              p.providerId ===
+              'password'
+          )
+        ) {
+
+          navigateTo(
+            'verifyScreen'
+          );
+
+          setAuthMessage(
+            'verifyMessage',
+            `Confirme o e-mail ${user.email} para continuar.`,
+            'info'
+          );
+
+          return;
+
+        }
+
+
+        navigateTo(
+          'homeScreen'
+        );
+
       }
-
-      updateUserUI(user);
-
-      if (!user.emailVerified && user.providerData.some(p => p.providerId === 'password')) {
-        navigateTo('verifyScreen');
-        setAuthMessage('verifyMessage', `Confirme o e-mail ${user.email} para continuar.`, 'info');
-        return;
-      }
-
-      navigateTo('homeScreen');
-    });
+    );
 
   } catch (error) {
-    console.error('Falha ao inicializar Firebase:', error);
-    setAuthMessage('loginMessage', 'Não foi possível inicializar a autenticação. Confira o config.js.', 'error');
+
+    console.error(
+      'Falha ao inicializar Firebase:',
+      error
+    );
+
+    setAuthMessage(
+      'loginMessage',
+      'Não foi possível inicializar a autenticação. Confira o config.js.',
+      'error'
+    );
+
   }
+
 }
 
-async function handleLogin(event) {
-  event.preventDefault();
 
-  if (!auth) {
-    setAuthMessage('loginMessage', 'Configure o Firebase no arquivo config.js antes de entrar.', 'error');
-    return;
-  }
+async function getRedirectResultSafe() {
 
-  const email = document.getElementById('loginEmail')?.value.trim();
-  const password = document.getElementById('loginPassword')?.value;
+  if (!auth) return;
 
-  if (!email || !password) {
-    setAuthMessage('loginMessage', 'Informe seu e-mail e sua senha.', 'error');
-    return;
-  }
-
-  setButtonLoading('loginBtn', true, 'Entrando...');
-  clearAuthMessage('loginMessage');
 
   try {
-    await auth.signInWithEmailAndPassword(email, password);
+
+    const result =
+      await auth.getRedirectResult();
+
+
+    if (
+      result &&
+      result.user
+    ) {
+
+      updateUserUI(
+        result.user
+      );
+
+    }
+
   } catch (error) {
-    setAuthMessage('loginMessage', firebaseAuthError(error), 'error');
+
+    console.error(
+      'Resultado do login Google por redirecionamento:',
+      error
+    );
+
+
+    const message =
+      firebaseAuthError(
+        error
+      );
+
+
+    if (message) {
+
+      setAuthMessage(
+        'loginMessage',
+        message,
+        'error'
+      );
+
+    }
+
+  }
+
+}
+
+
+async function handleLogin(
+  event
+) {
+
+  event.preventDefault();
+
+
+  if (!auth) {
+
+    setAuthMessage(
+      'loginMessage',
+      'Configure o Firebase no arquivo config.js antes de entrar.',
+      'error'
+    );
+
+    return;
+
+  }
+
+
+  const email =
+    document
+      .getElementById(
+        'loginEmail'
+      )
+      ?.value
+      .trim();
+
+
+  const password =
+    document
+      .getElementById(
+        'loginPassword'
+      )
+      ?.value;
+
+
+  if (
+    !email ||
+    !password
+  ) {
+
+    setAuthMessage(
+      'loginMessage',
+      'Informe seu e-mail e sua senha.',
+      'error'
+    );
+
+    return;
+
+  }
+
+
+  setButtonLoading(
+    'loginBtn',
+    true,
+    'Entrando...'
+  );
+
+
+  clearAuthMessage(
+    'loginMessage'
+  );
+
+
+  try {
+
+    await auth.signInWithEmailAndPassword(
+      email,
+      password
+    );
+
+  } catch (error) {
+
+    setAuthMessage(
+      'loginMessage',
+      firebaseAuthError(
+        error
+      ),
+      'error'
+    );
+
   } finally {
-    setButtonLoading('loginBtn', false, 'Entrar');
+
+    setButtonLoading(
+      'loginBtn',
+      false,
+      'Entrar'
+    );
+
   }
+
 }
 
-async function handleRegister(event) {
+
+async function handleRegister(
+  event
+) {
+
   event.preventDefault();
 
+
   if (!auth) {
-    setAuthMessage('registerMessage', 'Configure o Firebase no arquivo config.js antes de criar a conta.', 'error');
+
+    setAuthMessage(
+      'registerMessage',
+      'Configure o Firebase no arquivo config.js antes de criar a conta.',
+      'error'
+    );
+
     return;
+
   }
 
-  const name = document.getElementById('registerName')?.value.trim();
-  const email = document.getElementById('registerEmail')?.value.trim();
-  const password = document.getElementById('registerPassword')?.value;
-  const confirm = document.getElementById('registerPasswordConfirm')?.value;
 
-  if (!name || !email || !password || !confirm) {
-    setAuthMessage('registerMessage', 'Preencha todos os campos.', 'error');
+  const name =
+    document
+      .getElementById(
+        'registerName'
+      )
+      ?.value
+      .trim();
+
+
+  const email =
+    document
+      .getElementById(
+        'registerEmail'
+      )
+      ?.value
+      .trim();
+
+
+  const password =
+    document
+      .getElementById(
+        'registerPassword'
+      )
+      ?.value;
+
+
+  const confirm =
+    document
+      .getElementById(
+        'registerPasswordConfirm'
+      )
+      ?.value;
+
+
+  if (
+    !name ||
+    !email ||
+    !password ||
+    !confirm
+  ) {
+
+    setAuthMessage(
+      'registerMessage',
+      'Preencha todos os campos.',
+      'error'
+    );
+
     return;
+
   }
 
-  if (password.length < 6) {
-    setAuthMessage('registerMessage', 'A senha precisa ter pelo menos 6 caracteres.', 'error');
+
+  if (
+    password.length < 6
+  ) {
+
+    setAuthMessage(
+      'registerMessage',
+      'A senha precisa ter pelo menos 6 caracteres.',
+      'error'
+    );
+
     return;
+
   }
 
-  if (password !== confirm) {
-    setAuthMessage('registerMessage', 'As senhas não coincidem.', 'error');
+
+  if (
+    password !== confirm
+  ) {
+
+    setAuthMessage(
+      'registerMessage',
+      'As senhas não coincidem.',
+      'error'
+    );
+
     return;
+
   }
 
-  setButtonLoading('registerBtn', true, 'Criando...');
-  clearAuthMessage('registerMessage');
+
+  setButtonLoading(
+    'registerBtn',
+    true,
+    'Criando...'
+  );
+
+
+  clearAuthMessage(
+    'registerMessage'
+  );
+
 
   try {
-    const credential = await auth.createUserWithEmailAndPassword(email, password);
+
+    const credential =
+      await auth.createUserWithEmailAndPassword(
+        email,
+        password
+      );
+
 
     if (credential.user) {
-      await credential.user.updateProfile({ displayName: name });
+
+      await credential.user.updateProfile({
+        displayName: name
+      });
+
+
       await credential.user.sendEmailVerification();
+
+
       await credential.user.reload();
+
     }
 
-    document.getElementById('registerForm')?.reset();
-    setAuthMessage('verifyMessage', `Enviamos uma mensagem de confirmação para ${email}.`, 'success');
-    navigateTo('verifyScreen');
+
+    document
+      .getElementById(
+        'registerForm'
+      )
+      ?.reset();
+
+
+    setAuthMessage(
+      'verifyMessage',
+      `Enviamos uma mensagem de confirmação para ${email}.`,
+      'success'
+    );
+
+
+    navigateTo(
+      'verifyScreen'
+    );
+
   } catch (error) {
-    setAuthMessage('registerMessage', firebaseAuthError(error), 'error');
+
+    setAuthMessage(
+      'registerMessage',
+      firebaseAuthError(
+        error
+      ),
+      'error'
+    );
+
   } finally {
-    setButtonLoading('registerBtn', false, 'Criar Conta');
+
+    setButtonLoading(
+      'registerBtn',
+      false,
+      'Criar Conta'
+    );
+
   }
+
 }
+
 
 async function handleGoogleSignIn() {
 
   if (!auth) {
-    setAuthMessage('loginMessage', 'Configure o Firebase no arquivo config.js antes de usar o Google.', 'error');
+
+    setAuthMessage(
+      'loginMessage',
+      'Configure o Firebase no arquivo config.js antes de usar o Google.',
+      'error'
+    );
+
     return;
+
   }
 
-  const provider = new firebase.auth.GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: 'select_account' });
+
+  const provider =
+    new firebase.auth.GoogleAuthProvider();
+
+
+  provider.setCustomParameters({
+    prompt: 'select_account'
+  });
+
 
   try {
-    await auth.signInWithPopup(provider);
+
+    await auth.signInWithPopup(
+      provider
+    );
+
   } catch (error) {
-    if (error?.code === 'auth/popup-closed-by-user') return;
-    setAuthMessage('loginMessage', firebaseAuthError(error), 'error');
-    setAuthMessage('registerMessage', firebaseAuthError(error), 'error');
+
+    if (
+      error?.code ===
+      'auth/popup-closed-by-user'
+    ) {
+
+      return;
+
+    }
+
+
+    if (
+      error?.code ===
+        'auth/popup-blocked' ||
+      error?.code ===
+        'auth/cancelled-popup-request'
+    ) {
+
+      try {
+
+        await auth.signInWithRedirect(
+          provider
+        );
+
+        return;
+
+      } catch (redirectError) {
+
+        error =
+          redirectError;
+
+      }
+
+    }
+
+
+    const message =
+      firebaseAuthError(
+        error
+      );
+
+
+    setAuthMessage(
+      'loginMessage',
+      message,
+      'error'
+    );
+
+
+    setAuthMessage(
+      'registerMessage',
+      message,
+      'error'
+    );
+
   }
+
 }
+
 
 async function handleForgotPassword() {
 
   if (!auth) {
-    setAuthMessage('loginMessage', 'Configure o Firebase no arquivo config.js antes de recuperar a senha.', 'error');
+
+    setAuthMessage(
+      'loginMessage',
+      'Configure o Firebase no arquivo config.js antes de recuperar a senha.',
+      'error'
+    );
+
     return;
+
   }
 
-  const email = document.getElementById('loginEmail')?.value.trim();
+
+  const email =
+    document
+      .getElementById(
+        'loginEmail'
+      )
+      ?.value
+      .trim();
+
 
   if (!email) {
-    setAuthMessage('loginMessage', 'Digite seu e-mail no campo acima para receber o link de recuperação.', 'info');
-    document.getElementById('loginEmail')?.focus();
+
+    setAuthMessage(
+      'loginMessage',
+      'Digite seu e-mail no campo acima para receber o link de recuperação.',
+      'info'
+    );
+
+
+    document
+      .getElementById(
+        'loginEmail'
+      )
+      ?.focus();
+
+
     return;
+
   }
 
+
   try {
-    await auth.sendPasswordResetEmail(email);
-    setAuthMessage('loginMessage', 'Enviamos o link de recuperação para o seu e-mail.', 'success');
+
+    await auth.sendPasswordResetEmail(
+      email
+    );
+
+
+    setAuthMessage(
+      'loginMessage',
+      'Enviamos o link de recuperação para o seu e-mail.',
+      'success'
+    );
+
   } catch (error) {
-    setAuthMessage('loginMessage', firebaseAuthError(error), 'error');
+
+    setAuthMessage(
+      'loginMessage',
+      firebaseAuthError(
+        error
+      ),
+      'error'
+    );
+
   }
+
 }
+
 
 async function resendVerificationEmail() {
 
   if (!auth?.currentUser) {
-    navigateTo('loginScreen');
+
+    navigateTo(
+      'loginScreen'
+    );
+
     return;
+
   }
 
+
   try {
+
     await auth.currentUser.sendEmailVerification();
-    setAuthMessage('verifyMessage', 'Novo e-mail de confirmação enviado.', 'success');
+
+
+    setAuthMessage(
+      'verifyMessage',
+      'Novo e-mail de confirmação enviado.',
+      'success'
+    );
+
   } catch (error) {
-    setAuthMessage('verifyMessage', firebaseAuthError(error), 'error');
+
+    setAuthMessage(
+      'verifyMessage',
+      firebaseAuthError(
+        error
+      ),
+      'error'
+    );
+
   }
+
 }
+
 
 async function checkEmailVerification() {
 
   if (!auth?.currentUser) {
-    navigateTo('loginScreen');
+
+    navigateTo(
+      'loginScreen'
+    );
+
     return;
+
   }
+
 
   try {
+
     await auth.currentUser.reload();
 
-    if (auth.currentUser.emailVerified) {
-      setAuthMessage('verifyMessage', 'E-mail confirmado com sucesso.', 'success');
-      navigateTo('homeScreen');
+
+    if (
+      auth.currentUser.emailVerified
+    ) {
+
+      setAuthMessage(
+        'verifyMessage',
+        'E-mail confirmado com sucesso.',
+        'success'
+      );
+
+
+      navigateTo(
+        'homeScreen'
+      );
+
     } else {
-      setAuthMessage('verifyMessage', 'Ainda não identificamos a confirmação. Abra o e-mail e clique no link antes de tentar novamente.', 'info');
+
+      setAuthMessage(
+        'verifyMessage',
+        'Ainda não identificamos a confirmação. Abra o e-mail e clique no link antes de tentar novamente.',
+        'info'
+      );
+
     }
+
   } catch (error) {
-    setAuthMessage('verifyMessage', firebaseAuthError(error), 'error');
+
+    setAuthMessage(
+      'verifyMessage',
+      firebaseAuthError(
+        error
+      ),
+      'error'
+    );
+
   }
+
 }
+
 
 async function handleLogout() {
 
   try {
+
     stopCamera();
+
+
     if (auth) {
+
       await auth.signOut();
+
     } else {
-      navigateTo('loginScreen');
+
+      navigateTo(
+        'loginScreen'
+      );
+
     }
+
   } catch (error) {
-    console.error('Erro ao sair:', error);
+
+    console.error(
+      'Erro ao sair:',
+      error
+    );
+
   }
+
 }
 
-function updateUserUI(user) {
 
-  const name = user?.displayName || user?.email?.split('@')[0] || 'usuário';
-  const userName = document.getElementById('userName');
-  const avatar = document.getElementById('avatarBtn');
+function updateUserUI(
+  user
+) {
 
-  if (userName) userName.textContent = name.split(' ')[0];
-  if (avatar) avatar.textContent = name.charAt(0).toUpperCase();
+  const name =
+    user?.displayName ||
+    user?.email?.split('@')[0] ||
+    'usuário';
+
+
+  const userName =
+    document.getElementById(
+      'userName'
+    );
+
+
+  const avatar =
+    document.getElementById(
+      'avatarBtn'
+    );
+
+
+  if (userName) {
+
+    userName.textContent =
+      name.split(' ')[0];
+
+  }
+
+
+  if (avatar) {
+
+    avatar.textContent =
+      name
+        .charAt(0)
+        .toUpperCase();
+
+  }
+
 }
 
-function setAuthMessage(id, message, type = 'info') {
-  const element = document.getElementById(id);
+
+function setAuthMessage(
+  id,
+  message,
+  type = 'info'
+) {
+
+  const element =
+    document.getElementById(
+      id
+    );
+
+
   if (!element) return;
-  element.textContent = message || '';
-  element.className = `auth-message ${type}`;
+
+
+  element.textContent =
+    message || '';
+
+
+  element.className =
+    `auth-message ${type}`;
+
 }
 
-function clearAuthMessage(id) {
-  const element = document.getElementById(id);
+
+function clearAuthMessage(
+  id
+) {
+
+  const element =
+    document.getElementById(
+      id
+    );
+
+
   if (!element) return;
-  element.textContent = '';
-  element.className = 'auth-message';
+
+
+  element.textContent =
+    '';
+
+
+  element.className =
+    'auth-message';
+
 }
+
 
 function clearAuthMessages() {
-  ['loginMessage', 'registerMessage', 'verifyMessage'].forEach(clearAuthMessage);
+
+  [
+    'loginMessage',
+    'registerMessage',
+    'verifyMessage'
+  ]
+    .forEach(
+      clearAuthMessage
+    );
+
 }
 
-function setButtonLoading(id, loading, label) {
-  const button = document.getElementById(id);
+
+function setButtonLoading(
+  id,
+  loading,
+  label
+) {
+
+  const button =
+    document.getElementById(
+      id
+    );
+
+
   if (!button) return;
-  button.disabled = loading;
-  button.classList.toggle('is-loading', loading);
-  button.textContent = label;
+
+
+  button.disabled =
+    loading;
+
+
+  button.classList.toggle(
+    'is-loading',
+    loading
+  );
+
+
+  button.textContent =
+    label;
+
 }
 
-function firebaseAuthError(error) {
-  const code = error?.code || '';
+
+function firebaseAuthError(
+  error
+) {
+
+  const code =
+    error?.code || '';
+
 
   const messages = {
-    'auth/invalid-email': 'Digite um e-mail válido.',
-    'auth/missing-password': 'Digite sua senha.',
-    'auth/weak-password': 'A senha é muito fraca. Use pelo menos 6 caracteres.',
-    'auth/email-already-in-use': 'Este e-mail já possui uma conta.',
-    'auth/invalid-credential': 'E-mail ou senha incorretos.',
-    'auth/user-not-found': 'Não encontramos uma conta com esse e-mail.',
-    'auth/wrong-password': 'E-mail ou senha incorretos.',
-    'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
-    'auth/popup-blocked': 'O navegador bloqueou a janela do Google. Permita pop-ups para este site.',
-    'auth/operation-not-allowed': 'Esse método de login ainda não foi ativado no Firebase.',
-    'auth/account-exists-with-different-credential': 'Esse e-mail já está cadastrado usando outro método de login.',
-    'auth/network-request-failed': 'Falha de conexão. Verifique sua internet e tente novamente.'
+
+    'auth/invalid-email':
+      'Digite um e-mail válido.',
+
+    'auth/missing-password':
+      'Digite sua senha.',
+
+    'auth/weak-password':
+      'A senha é muito fraca. Use pelo menos 6 caracteres.',
+
+    'auth/email-already-in-use':
+      'Este e-mail já possui uma conta.',
+
+    'auth/invalid-credential':
+      'E-mail ou senha incorretos.',
+
+    'auth/user-not-found':
+      'Não encontramos uma conta com esse e-mail.',
+
+    'auth/wrong-password':
+      'E-mail ou senha incorretos.',
+
+    'auth/too-many-requests':
+      'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
+
+    'auth/popup-blocked':
+      'O navegador bloqueou a janela do Google. Permita pop-ups para este site.',
+
+    'auth/operation-not-allowed':
+      'Esse método de login ainda não foi ativado no Firebase.',
+
+    'auth/account-exists-with-different-credential':
+      'Esse e-mail já está cadastrado usando outro método de login.',
+
+    'auth/network-request-failed':
+      'Falha de conexão. Verifique sua internet e tente novamente.'
+
   };
 
-  return messages[code] || 'Não foi possível concluir a autenticação. Tente novamente.';
+
+  return (
+    messages[code] ||
+    'Não foi possível concluir a autenticação. Tente novamente.'
+  );
+
 }
 
 
@@ -668,49 +1508,71 @@ function firebaseAuthError(error) {
 // NAVEGAÇÃO
 // ============================================================
 
-function handleGlobalClicks(event) {
+function handleGlobalClicks(
+  event
+) {
 
   const go =
-    event.target.closest('[data-go]');
+    event.target.closest(
+      '[data-go]'
+    );
+
 
   if (!go) return;
 
+
   const target =
-    go.getAttribute('data-go');
+    go.getAttribute(
+      'data-go'
+    );
+
 
   if (target) {
 
-    navigateTo(target);
+    navigateTo(
+      target
+    );
 
   }
 
 }
 
 
-function navigateTo(screenId) {
+function navigateTo(
+  screenId
+) {
 
-  const publicScreens = new Set(['loginScreen', 'registerScreen', 'verifyScreen']);
+  const publicScreens =
+    new Set([
+      'loginScreen',
+      'registerScreen',
+      'verifyScreen'
+    ]);
 
-  if (authReady && !currentUser && !publicScreens.has(screenId)) {
-    screenId = 'loginScreen';
+
+  if (
+    authReady &&
+    !currentUser &&
+    !publicScreens.has(
+      screenId
+    )
+  ) {
+
+    screenId =
+      'loginScreen';
+
   }
 
-  // IMPORTANTE:
-  //
-  // Primeiro mudamos currentScreen.
-  //
-  // Depois abrimos a câmera.
-  //
-  // Antes estava invertido e o loop de
-  // detecção podia terminar imediatamente.
 
   const previousScreen =
     currentScreen;
 
 
   if (
-    previousScreen === 'cameraScreen' &&
-    screenId !== 'cameraScreen'
+    previousScreen ===
+      'cameraScreen' &&
+    screenId !==
+      'cameraScreen'
   ) {
 
     stopCamera();
@@ -724,17 +1586,23 @@ function navigateTo(screenId) {
 
   screens.forEach(
     screen =>
-      screen.classList.remove('active')
+      screen.classList.remove(
+        'active'
+      )
   );
 
 
   const target =
-    document.getElementById(screenId);
+    document.getElementById(
+      screenId
+    );
 
 
   if (target) {
 
-    target.classList.add('active');
+    target.classList.add(
+      'active'
+    );
 
   }
 
@@ -745,7 +1613,8 @@ function navigateTo(screenId) {
 
 
   if (
-    screenId === 'cameraScreen'
+    screenId ===
+    'cameraScreen'
   ) {
 
     openCamera();
@@ -754,7 +1623,8 @@ function navigateTo(screenId) {
 
 
   if (
-    screenId === 'historyScreen'
+    screenId ===
+    'historyScreen'
   ) {
 
     renderHistory();
@@ -763,7 +1633,8 @@ function navigateTo(screenId) {
 
 
   if (
-    screenId === 'statsScreen'
+    screenId ===
+    'statsScreen'
   ) {
 
     renderStats();
@@ -772,7 +1643,8 @@ function navigateTo(screenId) {
 
 
   if (
-    screenId === 'achievementsScreen'
+    screenId ===
+    'achievementsScreen'
   ) {
 
     renderAchievements();
@@ -794,17 +1666,21 @@ function updateNavState(
 ) {
 
   document
-    .querySelectorAll('.nav-item')
-    .forEach(button => {
+    .querySelectorAll(
+      '.nav-item'
+    )
+    .forEach(
+      button => {
 
-      button.classList.toggle(
-        'active',
-        button.getAttribute(
-          'data-go'
-        ) === screenId
-      );
+        button.classList.toggle(
+          'active',
+          button.getAttribute(
+            'data-go'
+          ) === screenId
+        );
 
-    });
+      }
+    );
 
 }
 
@@ -824,15 +1700,19 @@ function getTheme() {
 }
 
 
-function applyTheme(theme) {
+function applyTheme(
+  theme
+) {
 
   document.body.dataset.theme =
     theme;
+
 
   localStorage.setItem(
     'ecoscan-theme',
     theme
   );
+
 
   setThemeSwitchUI();
 
@@ -919,10 +1799,12 @@ function renderHomeStats() {
       'totalCount'
     );
 
+
   const recycle =
     document.getElementById(
       'recycleCount'
     );
+
 
   const organic =
     document.getElementById(
@@ -1001,80 +1883,82 @@ function renderHistory() {
     savedDetections
       .slice()
       .reverse()
-      .map(item => {
+      .map(
+        item => {
 
-        const date =
-          new Date(
-            item.detectedAt
-          ).toLocaleDateString(
-            'pt-BR'
-          );
-
-
-        const confidence =
-          Number.isFinite(
-            item.confidence
-          )
-            ? ` • ${(item.confidence * 100).toFixed(0)}%`
-            : '';
+          const date =
+            new Date(
+              item.detectedAt
+            ).toLocaleDateString(
+              'pt-BR'
+            );
 
 
-        return `
-          <article class="info-card">
+          const confidence =
+            Number.isFinite(
+              item.confidence
+            )
+              ? ` • ${(item.confidence * 100).toFixed(0)}%`
+              : '';
 
-            <div
-              style="
-                display:flex;
-                justify-content:space-between;
-                gap:16px;
-                align-items:flex-start
-              "
-            >
 
-              <div>
+          return `
+            <article class="info-card">
 
-                <h3
+              <div
+                style="
+                  display:flex;
+                  justify-content:space-between;
+                  gap:16px;
+                  align-items:flex-start
+                "
+              >
+
+                <div>
+
+                  <h3
+                    style="
+                      margin-bottom:6px
+                    "
+                  >
+                    ${escapeHTML(
+                      item.name
+                    )}
+                  </h3>
+
+                  <p
+                    style="
+                      margin:0;
+                      color:var(--muted)
+                    "
+                  >
+                    ${escapeHTML(
+                      item.category
+                    )}
+                    •
+                    ${escapeHTML(
+                      item.bin
+                    )}
+                    ${confidence}
+                  </p>
+
+                </div>
+
+                <small
                   style="
-                    margin-bottom:6px
-                  "
-                >
-                  ${escapeHTML(
-                    item.name
-                  )}
-                </h3>
-
-                <p
-                  style="
-                    margin:0;
                     color:var(--muted)
                   "
                 >
-                  ${escapeHTML(
-                    item.category
-                  )}
-                  •
-                  ${escapeHTML(
-                    item.bin
-                  )}
-                  ${confidence}
-                </p>
+                  ${date}
+                </small>
 
               </div>
 
-              <small
-                style="
-                  color:var(--muted)
-                "
-              >
-                ${date}
-              </small>
+            </article>
+          `;
 
-            </div>
-
-          </article>
-        `;
-
-      })
+        }
+      )
       .join('');
 
 }
@@ -1107,8 +1991,8 @@ function renderStats() {
     item => {
 
       if (
-        counts[item.category]
-        !== undefined
+        counts[item.category] !==
+        undefined
       ) {
 
         counts[item.category]++;
@@ -1122,12 +2006,17 @@ function renderStats() {
   const max =
     Math.max(
       1,
-      ...Object.values(counts)
+      ...Object.values(
+        counts
+      )
     );
 
 
   const setBar =
-    (id, count) => {
+    (
+      id,
+      count
+    ) => {
 
       const element =
         document.getElementById(
@@ -1170,9 +2059,13 @@ function renderStats() {
   };
 
 
-  Object.entries(ids)
+  Object.entries(
+    ids
+  )
     .forEach(
-      ([category, id]) => {
+      (
+        [category, id]
+      ) => {
 
         const element =
           document.getElementById(
@@ -1235,17 +2128,23 @@ function renderStats() {
     '🌱 Iniciante Verde';
 
 
-  if (total >= 50) {
+  if (
+    total >= 50
+  ) {
 
     level =
       '🏆 Mestre Sustentável';
 
-  } else if (total >= 25) {
+  } else if (
+    total >= 25
+  ) {
 
     level =
       '🌎 Guardião Ambiental';
 
-  } else if (total >= 10) {
+  } else if (
+    total >= 10
+  ) {
 
     level =
       '♻️ Reciclador';
@@ -1294,7 +2193,9 @@ function renderAchievements() {
 
 
   document
-    .getElementById('ach1')
+    .getElementById(
+      'ach1'
+    )
     ?.classList.toggle(
       'locked',
       total < 1
@@ -1302,7 +2203,9 @@ function renderAchievements() {
 
 
   document
-    .getElementById('ach2')
+    .getElementById(
+      'ach2'
+    )
     ?.classList.toggle(
       'locked',
       total < 10
@@ -1310,7 +2213,9 @@ function renderAchievements() {
 
 
   document
-    .getElementById('ach3')
+    .getElementById(
+      'ach3'
+    )
     ?.classList.toggle(
       'locked',
       total < 25
@@ -1318,7 +2223,9 @@ function renderAchievements() {
 
 
   document
-    .getElementById('ach4')
+    .getElementById(
+      'ach4'
+    )
     ?.classList.toggle(
       'locked',
       total < 50
@@ -1333,11 +2240,17 @@ function renderAchievements() {
 
 async function openCamera() {
 
-  staticImageMode = false;
+  staticImageMode =
+    false;
+
 
   if (cameraFeed) {
-    cameraFeed.style.opacity = '1';
+
+    cameraFeed.style.opacity =
+      '1';
+
   }
+
 
   if (stream) return;
 
@@ -1373,10 +2286,6 @@ async function openCamera() {
       '📷 Abrindo câmera...'
     );
 
-
-    // --------------------------------------------------------
-    // CÂMERA
-    // --------------------------------------------------------
 
     stream =
       await navigator
@@ -1434,7 +2343,7 @@ async function openCamera() {
 
 
     // --------------------------------------------------------
-    // TENTAR ZOOM
+    // ZOOM
     // --------------------------------------------------------
 
     try {
@@ -1488,20 +2397,7 @@ async function openCamera() {
     }
 
 
-    // --------------------------------------------------------
-    // NÃO ESPERAR O HEALTH PARA MOSTRAR A CÂMERA
-    // --------------------------------------------------------
-    //
-    // Isso é importante no Render Free.
-    //
-    // O serviço pode estar dormindo.
-    //
-    // A câmera deve aparecer imediatamente.
-    //
-    // O primeiro /predict irá acordar o backend.
-
     startDetectionLoop();
-
 
   } catch (error) {
 
@@ -1539,7 +2435,9 @@ function stopCamera() {
   detectionLoopActive =
     false;
 
-  staticImageMode = false;
+
+  staticImageMode =
+    false;
 
 
   lastPredictions =
@@ -1564,7 +2462,8 @@ function stopCamera() {
       );
 
 
-    stream = null;
+    stream =
+      null;
 
   }
 
@@ -1625,8 +2524,7 @@ function formatCameraError(
   ) {
 
     return (
-      'Permita o acesso à câmera '
-      + 'nas configurações do navegador.'
+      'Permita o acesso à câmera nas configurações do navegador.'
     );
 
   }
@@ -1652,8 +2550,7 @@ function formatCameraError(
   ) {
 
     return (
-      'A câmera está sendo usada '
-      + 'por outro aplicativo.'
+      'A câmera está sendo usada por outro aplicativo.'
     );
 
   }
@@ -1689,7 +2586,10 @@ function waitForVideoMetadata(
 ) {
 
   return new Promise(
-    (resolve, reject) => {
+    (
+      resolve,
+      reject
+    ) => {
 
       if (
         video.videoWidth &&
@@ -1760,8 +2660,11 @@ function waitForVideoMetadata(
 function resizeOverlay() {
 
   if (staticImageMode) {
+
     return;
+
   }
+
 
   if (
     !cameraFeed?.videoWidth ||
@@ -1788,36 +2691,59 @@ function resizeOverlay() {
 // TESTE MANUAL POR IMAGEM
 // ============================================================
 
-async function handleImageSelection(event) {
+async function handleImageSelection(
+  event
+) {
 
   const file =
     event.target.files?.[0];
 
-  event.target.value = '';
+
+  event.target.value =
+    '';
+
 
   if (!file) return;
 
-  if (!file.type.startsWith('image/')) {
 
-    alert('Selecione uma imagem válida.');
+  if (
+    !file.type.startsWith(
+      'image/'
+    )
+  ) {
+
+    alert(
+      'Selecione uma imagem válida.'
+    );
 
     return;
+
   }
+
 
   try {
 
     stopCamera();
 
-    staticImageMode = true;
+
+    staticImageMode =
+      true;
+
 
     setDetectionStatus(
       '🖼️ Preparando imagem...'
     );
 
-    const image =
-      await loadImageFile(file);
 
-    const maxDimension = 960;
+    const image =
+      await loadImageFile(
+        file
+      );
+
+
+    const maxDimension =
+      960;
+
 
     const scale =
       Math.min(
@@ -1829,30 +2755,46 @@ async function handleImageSelection(event) {
           )
       );
 
+
     const width =
       Math.max(
         1,
         Math.round(
-          image.naturalWidth * scale
+          image.naturalWidth *
+          scale
         )
       );
+
 
     const height =
       Math.max(
         1,
         Math.round(
-          image.naturalHeight * scale
+          image.naturalHeight *
+          scale
         )
       );
 
-    frameCanvas =
-      document.createElement('canvas');
 
-    frameCanvas.width = width;
-    frameCanvas.height = height;
+    frameCanvas =
+      document.createElement(
+        'canvas'
+      );
+
+
+    frameCanvas.width =
+      width;
+
+
+    frameCanvas.height =
+      height;
+
 
     frameContext =
-      frameCanvas.getContext('2d');
+      frameCanvas.getContext(
+        '2d'
+      );
+
 
     frameContext.drawImage(
       image,
@@ -1862,14 +2804,17 @@ async function handleImageSelection(event) {
       height
     );
 
+
     const blob =
       await canvasToBlob(
         frameCanvas,
         0.60
       );
 
+
     const formData =
       new FormData();
+
 
     formData.append(
       'file',
@@ -1877,9 +2822,11 @@ async function handleImageSelection(event) {
       'image.jpg'
     );
 
+
     setDetectionStatus(
       '🤖 Analisando imagem...'
     );
+
 
     const response =
       await fetchWithTimeout(
@@ -1892,26 +2839,41 @@ async function handleImageSelection(event) {
         API_TIMEOUT_MS
       );
 
+
     if (!response.ok) {
 
       const message =
         await response.text();
 
+
       throw new Error(
         `API ${response.status}: ${message}`
       );
+
     }
+
 
     const result =
       await response.json();
 
-    apiOnline = true;
 
-    overlay.width = width;
-    overlay.height = height;
+    apiOnline =
+      true;
+
+
+    overlay.width =
+      width;
+
+
+    overlay.height =
+      height;
+
 
     const ctx =
-      overlay.getContext('2d');
+      overlay.getContext(
+        '2d'
+      );
+
 
     ctx.clearRect(
       0,
@@ -1919,6 +2881,7 @@ async function handleImageSelection(event) {
       width,
       height
     );
+
 
     ctx.drawImage(
       image,
@@ -1928,17 +2891,21 @@ async function handleImageSelection(event) {
       height
     );
 
+
     lastPredictions =
       result.predictions || [];
+
 
     drawPredictions(
       lastPredictions,
       true
     );
 
+
     updateDetectionCard(
       lastPredictions
     );
+
 
     setDetectionStatus(
       lastPredictions.length
@@ -1953,68 +2920,102 @@ async function handleImageSelection(event) {
       error
     );
 
-    apiOnline = false;
+
+    apiOnline =
+      false;
+
 
     setDetectionStatus(
       '❌ Não foi possível analisar a imagem.'
     );
 
-    updateDetectionCard([]);
+
+    updateDetectionCard(
+      []
+    );
+
 
     alert(
-      `Não foi possível analisar a imagem.\n\n${error.message || error}`
+      `Não foi possível analisar a imagem.\n\n${
+        error.message || error
+      }`
     );
 
   }
+
 }
 
 
-function loadImageFile(file) {
+function loadImageFile(
+  file
+) {
 
   return new Promise(
-    (resolve, reject) => {
+    (
+      resolve,
+      reject
+    ) => {
 
       const url =
-        URL.createObjectURL(file);
+        URL.createObjectURL(
+          file
+        );
+
 
       const image =
         new Image();
 
-      image.onload = () => {
 
-        URL.revokeObjectURL(url);
+      image.onload =
+        () => {
 
-        if (
-          !image.naturalWidth ||
-          !image.naturalHeight
-        ) {
+          URL.revokeObjectURL(
+            url
+          );
+
+
+          if (
+            !image.naturalWidth ||
+            !image.naturalHeight
+          ) {
+
+            reject(
+              new Error(
+                'A imagem não possui dimensões válidas.'
+              )
+            );
+
+            return;
+
+          }
+
+
+          resolve(
+            image
+          );
+
+        };
+
+
+      image.onerror =
+        () => {
+
+          URL.revokeObjectURL(
+            url
+          );
+
 
           reject(
             new Error(
-              'A imagem não possui dimensões válidas.'
+              'Não foi possível abrir a imagem.'
             )
           );
 
-          return;
-        }
+        };
 
-        resolve(image);
 
-      };
-
-      image.onerror = () => {
-
-        URL.revokeObjectURL(url);
-
-        reject(
-          new Error(
-            'Não foi possível abrir a imagem.'
-          )
-        );
-
-      };
-
-      image.src = url;
+      image.src =
+        url;
 
     }
   );
@@ -2025,7 +3026,6 @@ function loadImageFile(file) {
 // ============================================================
 // LOOP YOLO
 // ============================================================
-
 
 async function startDetectionLoop() {
 
@@ -2118,9 +3118,6 @@ async function startDetectionLoop() {
       );
 
 
-      // Render Free pode demorar
-      // para acordar.
-
       await sleep(
         2500
       );
@@ -2168,7 +3165,7 @@ async function detectFrame() {
       1,
       Math.round(
         cameraFeed.videoWidth *
-          scale
+        scale
       )
     );
 
@@ -2178,21 +3175,17 @@ async function detectFrame() {
       1,
       Math.round(
         cameraFeed.videoHeight *
-          scale
+        scale
       )
     );
 
 
   frameContext.drawImage(
-
     cameraFeed,
-
     0,
     0,
-
     frameCanvas.width,
     frameCanvas.height
-
   );
 
 
@@ -2216,21 +3209,13 @@ async function detectFrame() {
 
   const response =
     await fetchWithTimeout(
-
       `${API_BASE}/predict`,
-
       {
-
         method: 'POST',
-
         body: formData,
-
         cache: 'no-store'
-
       },
-
       API_TIMEOUT_MS
-
     );
 
 
@@ -2266,14 +3251,15 @@ async function detectFrame() {
 
 
   result.predictions =
-    (result.predictions || [])
+    (
+      result.predictions || []
+    )
       .map(
         prediction => {
 
           if (
             !prediction.bbox ||
-            prediction.bbox.length <
-              4
+            prediction.bbox.length < 4
           ) {
 
             return null;
@@ -2305,7 +3291,9 @@ async function detectFrame() {
 
         }
       )
-      .filter(Boolean);
+      .filter(
+        Boolean
+      );
 
 
   return result;
@@ -2367,15 +3355,19 @@ function canvasToBlob(
 ) {
 
   return new Promise(
-    (resolve, reject) => {
+    (
+      resolve,
+      reject
+    ) => {
 
       canvas.toBlob(
-
         blob => {
 
           if (blob) {
 
-            resolve(blob);
+            resolve(
+              blob
+            );
 
           } else {
 
@@ -2388,11 +3380,8 @@ function canvasToBlob(
           }
 
         },
-
         'image/jpeg',
-
         quality
-
       );
 
     }
@@ -2410,10 +3399,14 @@ function drawPredictions(
   preserveBackground = false
 ) {
 
-  resizeOverlay();
-
-
   if (!overlay) return;
+
+
+  if (!staticImageMode) {
+
+    resizeOverlay();
+
+  }
 
 
   const ctx =
@@ -2423,12 +3416,14 @@ function drawPredictions(
 
 
   if (!preserveBackground) {
+
     ctx.clearRect(
       0,
       0,
       overlay.width,
       overlay.height
     );
+
   }
 
 
@@ -2471,6 +3466,16 @@ function drawPredictions(
     .forEach(
       prediction => {
 
+        if (
+          !prediction.bbox ||
+          prediction.bbox.length < 4
+        ) {
+
+          return;
+
+        }
+
+
         const [
           x,
           y,
@@ -2495,8 +3500,7 @@ function drawPredictions(
 
         const confidence =
           Number(
-            prediction.score ||
-            0
+            prediction.score || 0
           );
 
 
@@ -2540,16 +3544,10 @@ function drawPredictions(
 
 
         ctx.fillRect(
-
           x,
-
-          textY -
-            boxHeight,
-
+          textY - boxHeight,
           textWidth + 14,
-
           boxHeight
-
         );
 
 
@@ -2558,17 +3556,107 @@ function drawPredictions(
 
 
         ctx.fillText(
-
           text,
-
           x + 7,
-
           textY - 7
-
         );
 
       }
     );
+
+}
+
+
+// ============================================================
+// RESOLVER REGRA DA DETECÇÃO
+// ============================================================
+//
+// Essa é uma das partes mais importantes.
+//
+// O backend pode enviar:
+//
+// category_key: "cardboard"
+// category: "Papel"
+// source_class: "cardboard"
+//
+// O EcoScan precisa entender que isso é PAPEL.
+//
+
+function resolveWasteRule(
+  prediction
+) {
+
+  if (!prediction) {
+
+    return null;
+
+  }
+
+
+  const candidates = [
+
+    prediction.category_key,
+
+    prediction.category,
+
+    prediction.source_class
+
+  ];
+
+
+  for (
+    const candidate of candidates
+  ) {
+
+    const normalized =
+      normalizeKey(
+        candidate
+      );
+
+
+    if (
+      !normalized
+    ) {
+
+      continue;
+
+    }
+
+
+    const alias =
+      WASTE_ALIASES[
+        normalized
+      ];
+
+
+    if (
+      alias &&
+      WASTE_RULES[alias]
+    ) {
+
+      return WASTE_RULES[
+        alias
+      ];
+
+    }
+
+
+    if (
+      WASTE_RULES[
+        normalized
+      ]
+    ) {
+
+      return WASTE_RULES[
+        normalized
+      ];
+
+    }
+
+  }
+
+
+  return null;
 
 }
 
@@ -2582,27 +3670,42 @@ function updateDetectionCard(
 ) {
 
   const valid =
-    (predictions || [])
+    (
+      predictions || []
+    )
       .filter(
         prediction =>
           Number(
             prediction.score
-          ) >=
-          MIN_CONFIDENCE
+          ) >= MIN_CONFIDENCE
       )
       .sort(
-        (a, b) =>
-          Number(b.score) -
-          Number(a.score)
+        (
+          a,
+          b
+        ) =>
+          Number(
+            b.score
+          ) -
+          Number(
+            a.score
+          )
       );
+
 
   const best =
     valid[0];
+
+
+  // ----------------------------------------------------------
+  // NENHUMA DETECÇÃO VÁLIDA
+  // ----------------------------------------------------------
 
   if (!best) {
 
     lastDetectionData =
       null;
+
 
     setDetectionCard({
 
@@ -2628,40 +3731,67 @@ function updateDetectionCard(
 
     });
 
+
     return;
 
   }
 
-  const categoryKey =
-    best.category_key ||
-    normalizeKey(
-      best.category
-    );
+
+  // ----------------------------------------------------------
+  // DEBUG
+  // ----------------------------------------------------------
+  //
+  // Isso vai mostrar no console exatamente o que o backend
+  // está mandando.
+  //
+
+  console.log(
+    '[EcoScan] Detecção recebida:',
+    best
+  );
+
+
+  // ----------------------------------------------------------
+  // ENCONTRAR REGRA
+  // ----------------------------------------------------------
 
   const rule =
-    WASTE_RULES[
-      categoryKey
-    ];
+    resolveWasteRule(
+      best
+    );
+
+
+  // ----------------------------------------------------------
+  // DETECÇÃO SEM REGRA
+  // ----------------------------------------------------------
 
   if (!rule) {
 
     console.warn(
       '[EcoScan] Regra não encontrada:',
       {
-        category: best.category,
-        category_key: best.category_key,
-        source_class: best.source_class
+        category:
+          best.category,
+
+        category_key:
+          best.category_key,
+
+        source_class:
+          best.source_class
       }
     );
 
+
     lastDetectionData =
       null;
+
 
     setDetectionCard({
 
       name:
         prettifyClassName(
-          best.source_class
+          best.source_class ||
+          best.category
         ),
 
       category:
@@ -2674,10 +3804,12 @@ function updateDetectionCard(
 
       dest:
         best.destination ||
+        best.dest ||
         '-',
 
       time:
         best.decomposition ||
+        best.time ||
         '-',
 
       fact:
@@ -2685,15 +3817,22 @@ function updateDetectionCard(
 
     });
 
+
     return;
 
   }
+
+
+  // ----------------------------------------------------------
+  // DETECÇÃO COM REGRA
+  // ----------------------------------------------------------
 
   lastDetectionData = {
 
     name:
       prettifyClassName(
-        best.source_class
+        best.source_class ||
+        best.category
       ),
 
     category:
@@ -2720,6 +3859,7 @@ function updateDetectionCard(
       best.source_class
 
   };
+
 
   setDetectionCard(
     lastDetectionData
@@ -2727,70 +3867,26 @@ function updateDetectionCard(
 
 }
 
-    const rule =
-      WASTE_RULES[
-        best.category_key ||
-        normalizeKey(best.category)
-      ];
 
-    if (!rule) {
-
-      console.warn(
-        'Regra não encontrada para:',
-        best
-      );
-
-      return;
-
-    }
-
-
-  lastDetectionData = {
-
-    name:
-      prettifyClassName(
-        best.source_class
-      ),
-
-    category:
-      rule.category,
-
-    bin:
-      rule.bin,
-
-    dest:
-      rule.dest,
-
-    time:
-      rule.time,
-
-    fact:
-      rule.fact,
-
-    confidence:
-      Number(
-        best.score
-      ),
-
-    sourceClass:
-      best.source_class
-
-  };
-
-
-  setDetectionCard(
-    lastDetectionData
-  );
-
+// ============================================================
+// ATUALIZAR CARD
+// ============================================================
 
 function setDetectionCard(
   data
 ) {
 
+  if (!data) {
+
+    return;
+
+  }
+
+
   if (detName) {
 
     detName.textContent =
-      data.name;
+      data.name || '-';
 
   }
 
@@ -2798,7 +3894,7 @@ function setDetectionCard(
   if (detType) {
 
     detType.textContent =
-      data.category;
+      data.category || '-';
 
   }
 
@@ -2806,7 +3902,7 @@ function setDetectionCard(
   if (detBin) {
 
     detBin.textContent =
-      data.bin;
+      data.bin || '-';
 
   }
 
@@ -2814,7 +3910,7 @@ function setDetectionCard(
   if (detDest) {
 
     detDest.textContent =
-      data.dest;
+      data.dest || '-';
 
   }
 
@@ -2822,7 +3918,7 @@ function setDetectionCard(
   if (detTime) {
 
     detTime.textContent =
-      data.time;
+      data.time || '-';
 
   }
 
@@ -2830,12 +3926,16 @@ function setDetectionCard(
   if (detFact) {
 
     detFact.textContent =
-      data.fact;
+      data.fact || '-';
 
   }
 
 }
 
+
+// ============================================================
+// STATUS DA DETECÇÃO
+// ============================================================
 
 function setDetectionStatus(
   message
@@ -2852,7 +3952,7 @@ function setDetectionStatus(
 
 
 // ============================================================
-// SALVAR
+// SALVAR DETECÇÃO
 // ============================================================
 
 function saveCurrentDetection() {
@@ -2906,6 +4006,7 @@ function saveCurrentDetection() {
 
   persistDetections();
 
+
   renderAll();
 
 
@@ -2913,6 +4014,7 @@ function saveCurrentDetection() {
 
     saveBtn.textContent =
       '✓ Salvo!';
+
 
     saveBtn.disabled =
       true;
@@ -2923,6 +4025,7 @@ function saveCurrentDetection() {
 
         saveBtn.textContent =
           'Salvar Detecção';
+
 
         saveBtn.disabled =
           false;
@@ -2953,8 +4056,9 @@ function normalizeKey(
       ''
     )
     .toLowerCase()
+    .trim()
     .replace(
-      /\s+/g,
+      /[\s-]+/g,
       '_'
     );
 
