@@ -36,6 +36,30 @@ const loginForm =
 const goRegisterBtn =
   document.getElementById('goRegisterBtn');
 
+const forgotPasswordBtn =
+  document.getElementById('forgotPasswordBtn');
+
+const googleLoginBtn =
+  document.getElementById('googleLoginBtn');
+
+const registerForm =
+  document.getElementById('registerForm');
+
+const googleRegisterBtn =
+  document.getElementById('googleRegisterBtn');
+
+const backToLoginBtn =
+  document.getElementById('backToLoginBtn');
+
+const checkVerificationBtn =
+  document.getElementById('checkVerificationBtn');
+
+const resendVerificationBtn =
+  document.getElementById('resendVerificationBtn');
+
+const verifyLogoutBtn =
+  document.getElementById('verifyLogoutBtn');
+
 const logoutBtn =
   document.getElementById('logoutBtn');
 
@@ -111,8 +135,15 @@ let apiOnline = false;
 
 let staticImageMode = false;
 
-let savedDetections =
-  loadSavedDetections();
+let savedDetections = loadSavedDetections();
+
+let auth = null;
+let currentUser = null;
+let authReady = false;
+
+const firebaseConfig = window.ECOSCAN_FIREBASE_CONFIG || {};
+
+initializeFirebase();
 
 
 // ============================================================
@@ -256,24 +287,25 @@ function init() {
   );
 
 
-  loginForm?.addEventListener(
-    'submit',
-    event => {
+  loginForm?.addEventListener('submit', handleLogin);
+  registerForm?.addEventListener('submit', handleRegister);
 
-      event.preventDefault();
+  goRegisterBtn?.addEventListener('click', () => {
+    clearAuthMessages();
+    navigateTo('registerScreen');
+  });
 
-      navigateTo(
-        'homeScreen'
-      );
+  backToLoginBtn?.addEventListener('click', () => {
+    clearAuthMessages();
+    navigateTo('loginScreen');
+  });
 
-    }
-  );
-
-
-  goRegisterBtn?.addEventListener(
-    'click',
-    () => navigateTo('homeScreen')
-  );
+  forgotPasswordBtn?.addEventListener('click', handleForgotPassword);
+  googleLoginBtn?.addEventListener('click', handleGoogleSignIn);
+  googleRegisterBtn?.addEventListener('click', handleGoogleSignIn);
+  checkVerificationBtn?.addEventListener('click', checkEmailVerification);
+  resendVerificationBtn?.addEventListener('click', resendVerificationEmail);
+  verifyLogoutBtn?.addEventListener('click', handleLogout);
 
 
   startScanBtn?.addEventListener(
@@ -298,10 +330,7 @@ function init() {
   );
 
 
-  logoutBtn?.addEventListener(
-    'click',
-    () => navigateTo('loginScreen')
-  );
+  logoutBtn?.addEventListener('click', handleLogout);
 
 
   themeSwitch?.addEventListener(
@@ -356,6 +385,286 @@ function init() {
 
 
 // ============================================================
+// FIREBASE AUTHENTICATION
+// ============================================================
+
+function initializeFirebase() {
+
+  try {
+
+    if (!window.firebase) {
+      console.error('Firebase SDK não carregado.');
+      return;
+    }
+
+    if (!firebaseConfig.apiKey || firebaseConfig.apiKey.includes('COLE_')) {
+      console.warn('Preencha o window.ECOSCAN_FIREBASE_CONFIG em config.js.');
+      return;
+    }
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+
+    auth = firebase.auth();
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+    auth.onAuthStateChanged(async user => {
+      currentUser = user;
+      authReady = true;
+
+      if (!user) {
+        navigateTo('loginScreen');
+        updateUserUI(null);
+        return;
+      }
+
+      updateUserUI(user);
+
+      if (!user.emailVerified && user.providerData.some(p => p.providerId === 'password')) {
+        navigateTo('verifyScreen');
+        setAuthMessage('verifyMessage', `Confirme o e-mail ${user.email} para continuar.`, 'info');
+        return;
+      }
+
+      navigateTo('homeScreen');
+    });
+
+  } catch (error) {
+    console.error('Falha ao inicializar Firebase:', error);
+    setAuthMessage('loginMessage', 'Não foi possível inicializar a autenticação. Confira o config.js.', 'error');
+  }
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+
+  if (!auth) {
+    setAuthMessage('loginMessage', 'Configure o Firebase no arquivo config.js antes de entrar.', 'error');
+    return;
+  }
+
+  const email = document.getElementById('loginEmail')?.value.trim();
+  const password = document.getElementById('loginPassword')?.value;
+
+  if (!email || !password) {
+    setAuthMessage('loginMessage', 'Informe seu e-mail e sua senha.', 'error');
+    return;
+  }
+
+  setButtonLoading('loginBtn', true, 'Entrando...');
+  clearAuthMessage('loginMessage');
+
+  try {
+    await auth.signInWithEmailAndPassword(email, password);
+  } catch (error) {
+    setAuthMessage('loginMessage', firebaseAuthError(error), 'error');
+  } finally {
+    setButtonLoading('loginBtn', false, 'Entrar');
+  }
+}
+
+async function handleRegister(event) {
+  event.preventDefault();
+
+  if (!auth) {
+    setAuthMessage('registerMessage', 'Configure o Firebase no arquivo config.js antes de criar a conta.', 'error');
+    return;
+  }
+
+  const name = document.getElementById('registerName')?.value.trim();
+  const email = document.getElementById('registerEmail')?.value.trim();
+  const password = document.getElementById('registerPassword')?.value;
+  const confirm = document.getElementById('registerPasswordConfirm')?.value;
+
+  if (!name || !email || !password || !confirm) {
+    setAuthMessage('registerMessage', 'Preencha todos os campos.', 'error');
+    return;
+  }
+
+  if (password.length < 6) {
+    setAuthMessage('registerMessage', 'A senha precisa ter pelo menos 6 caracteres.', 'error');
+    return;
+  }
+
+  if (password !== confirm) {
+    setAuthMessage('registerMessage', 'As senhas não coincidem.', 'error');
+    return;
+  }
+
+  setButtonLoading('registerBtn', true, 'Criando...');
+  clearAuthMessage('registerMessage');
+
+  try {
+    const credential = await auth.createUserWithEmailAndPassword(email, password);
+
+    if (credential.user) {
+      await credential.user.updateProfile({ displayName: name });
+      await credential.user.sendEmailVerification();
+      await credential.user.reload();
+    }
+
+    document.getElementById('registerForm')?.reset();
+    setAuthMessage('verifyMessage', `Enviamos uma mensagem de confirmação para ${email}.`, 'success');
+    navigateTo('verifyScreen');
+  } catch (error) {
+    setAuthMessage('registerMessage', firebaseAuthError(error), 'error');
+  } finally {
+    setButtonLoading('registerBtn', false, 'Criar Conta');
+  }
+}
+
+async function handleGoogleSignIn() {
+
+  if (!auth) {
+    setAuthMessage('loginMessage', 'Configure o Firebase no arquivo config.js antes de usar o Google.', 'error');
+    return;
+  }
+
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  try {
+    await auth.signInWithPopup(provider);
+  } catch (error) {
+    if (error?.code === 'auth/popup-closed-by-user') return;
+    setAuthMessage('loginMessage', firebaseAuthError(error), 'error');
+    setAuthMessage('registerMessage', firebaseAuthError(error), 'error');
+  }
+}
+
+async function handleForgotPassword() {
+
+  if (!auth) {
+    setAuthMessage('loginMessage', 'Configure o Firebase no arquivo config.js antes de recuperar a senha.', 'error');
+    return;
+  }
+
+  const email = document.getElementById('loginEmail')?.value.trim();
+
+  if (!email) {
+    setAuthMessage('loginMessage', 'Digite seu e-mail no campo acima para receber o link de recuperação.', 'info');
+    document.getElementById('loginEmail')?.focus();
+    return;
+  }
+
+  try {
+    await auth.sendPasswordResetEmail(email);
+    setAuthMessage('loginMessage', 'Enviamos o link de recuperação para o seu e-mail.', 'success');
+  } catch (error) {
+    setAuthMessage('loginMessage', firebaseAuthError(error), 'error');
+  }
+}
+
+async function resendVerificationEmail() {
+
+  if (!auth?.currentUser) {
+    navigateTo('loginScreen');
+    return;
+  }
+
+  try {
+    await auth.currentUser.sendEmailVerification();
+    setAuthMessage('verifyMessage', 'Novo e-mail de confirmação enviado.', 'success');
+  } catch (error) {
+    setAuthMessage('verifyMessage', firebaseAuthError(error), 'error');
+  }
+}
+
+async function checkEmailVerification() {
+
+  if (!auth?.currentUser) {
+    navigateTo('loginScreen');
+    return;
+  }
+
+  try {
+    await auth.currentUser.reload();
+
+    if (auth.currentUser.emailVerified) {
+      setAuthMessage('verifyMessage', 'E-mail confirmado com sucesso.', 'success');
+      navigateTo('homeScreen');
+    } else {
+      setAuthMessage('verifyMessage', 'Ainda não identificamos a confirmação. Abra o e-mail e clique no link antes de tentar novamente.', 'info');
+    }
+  } catch (error) {
+    setAuthMessage('verifyMessage', firebaseAuthError(error), 'error');
+  }
+}
+
+async function handleLogout() {
+
+  try {
+    stopCamera();
+    if (auth) {
+      await auth.signOut();
+    } else {
+      navigateTo('loginScreen');
+    }
+  } catch (error) {
+    console.error('Erro ao sair:', error);
+  }
+}
+
+function updateUserUI(user) {
+
+  const name = user?.displayName || user?.email?.split('@')[0] || 'usuário';
+  const userName = document.getElementById('userName');
+  const avatar = document.getElementById('avatarBtn');
+
+  if (userName) userName.textContent = name.split(' ')[0];
+  if (avatar) avatar.textContent = name.charAt(0).toUpperCase();
+}
+
+function setAuthMessage(id, message, type = 'info') {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.textContent = message || '';
+  element.className = `auth-message ${type}`;
+}
+
+function clearAuthMessage(id) {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.textContent = '';
+  element.className = 'auth-message';
+}
+
+function clearAuthMessages() {
+  ['loginMessage', 'registerMessage', 'verifyMessage'].forEach(clearAuthMessage);
+}
+
+function setButtonLoading(id, loading, label) {
+  const button = document.getElementById(id);
+  if (!button) return;
+  button.disabled = loading;
+  button.classList.toggle('is-loading', loading);
+  button.textContent = label;
+}
+
+function firebaseAuthError(error) {
+  const code = error?.code || '';
+
+  const messages = {
+    'auth/invalid-email': 'Digite um e-mail válido.',
+    'auth/missing-password': 'Digite sua senha.',
+    'auth/weak-password': 'A senha é muito fraca. Use pelo menos 6 caracteres.',
+    'auth/email-already-in-use': 'Este e-mail já possui uma conta.',
+    'auth/invalid-credential': 'E-mail ou senha incorretos.',
+    'auth/user-not-found': 'Não encontramos uma conta com esse e-mail.',
+    'auth/wrong-password': 'E-mail ou senha incorretos.',
+    'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
+    'auth/popup-blocked': 'O navegador bloqueou a janela do Google. Permita pop-ups para este site.',
+    'auth/operation-not-allowed': 'Esse método de login ainda não foi ativado no Firebase.',
+    'auth/account-exists-with-different-credential': 'Esse e-mail já está cadastrado usando outro método de login.',
+    'auth/network-request-failed': 'Falha de conexão. Verifique sua internet e tente novamente.'
+  };
+
+  return messages[code] || 'Não foi possível concluir a autenticação. Tente novamente.';
+}
+
+
+// ============================================================
 // NAVEGAÇÃO
 // ============================================================
 
@@ -379,6 +688,12 @@ function handleGlobalClicks(event) {
 
 
 function navigateTo(screenId) {
+
+  const publicScreens = new Set(['loginScreen', 'registerScreen', 'verifyScreen']);
+
+  if (authReady && !currentUser && !publicScreens.has(screenId)) {
+    screenId = 'loginScreen';
+  }
 
   // IMPORTANTE:
   //

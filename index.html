@@ -18,21 +18,79 @@
         <h1>EcoScan AI</h1>
         <p>Entre na sua conta</p>
 
-        <form id="loginForm" class="form">
+        <form id="loginForm" class="form" novalidate>
           <label>
             E-mail
-            <input type="email" placeholder="seu@email.com" required />
+            <input id="loginEmail" type="email" placeholder="seu@email.com" autocomplete="email" required />
           </label>
 
           <label>
             Senha
-            <input type="password" placeholder="••••••••" required />
+            <input id="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password" required />
           </label>
 
-          <button type="submit" class="btn btn-primary">Entrar</button>
+          <button type="submit" class="btn btn-primary" id="loginBtn">Entrar</button>
           <button type="button" class="btn btn-outline" id="goRegisterBtn">Criar Conta</button>
-          <button type="button" class="link-btn">Recuperar Senha</button>
+          <button type="button" class="link-btn" id="forgotPasswordBtn">Recuperar Senha</button>
+          <div class="auth-divider"><span>ou</span></div>
+          <button type="button" class="btn google-btn" id="googleLoginBtn">
+            <span class="google-icon">G</span>
+            Continuar com Google
+          </button>
+          <div class="auth-message" id="loginMessage" role="alert" aria-live="polite"></div>
         </form>
+      </div>
+    </section>
+
+    <section class="screen" id="registerScreen">
+      <div class="auth-card">
+        <div class="logo">♻️</div>
+        <h1>Criar Conta</h1>
+        <p>Comece a usar o EcoScan AI</p>
+
+        <form id="registerForm" class="form" novalidate>
+          <label>
+            Nome
+            <input id="registerName" type="text" placeholder="Seu nome" autocomplete="name" required />
+          </label>
+
+          <label>
+            E-mail
+            <input id="registerEmail" type="email" placeholder="seu@email.com" autocomplete="email" required />
+          </label>
+
+          <label>
+            Senha
+            <input id="registerPassword" type="password" placeholder="Mínimo de 6 caracteres" autocomplete="new-password" minlength="6" required />
+          </label>
+
+          <label>
+            Confirmar senha
+            <input id="registerPasswordConfirm" type="password" placeholder="Repita a senha" autocomplete="new-password" minlength="6" required />
+          </label>
+
+          <button type="submit" class="btn btn-primary" id="registerBtn">Criar Conta</button>
+          <button type="button" class="btn google-btn" id="googleRegisterBtn">
+            <span class="google-icon">G</span>
+            Continuar com Google
+          </button>
+          <button type="button" class="link-btn" id="backToLoginBtn">Já tenho uma conta</button>
+          <div class="auth-message" id="registerMessage" role="alert" aria-live="polite"></div>
+        </form>
+      </div>
+    </section>
+
+    <section class="screen" id="verifyScreen">
+      <div class="auth-card">
+        <div class="logo">✉️</div>
+        <h1>Verifique seu e-mail</h1>
+        <p id="verifyDescription">Enviamos um link de confirmação para o seu e-mail.</p>
+        <div class="form verify-actions">
+          <button type="button" class="btn btn-primary" id="checkVerificationBtn">Já verifiquei meu e-mail</button>
+          <button type="button" class="btn btn-outline" id="resendVerificationBtn">Reenviar e-mail</button>
+          <button type="button" class="link-btn" id="verifyLogoutBtn">Sair</button>
+          <div class="auth-message" id="verifyMessage" role="alert" aria-live="polite"></div>
+        </div>
       </div>
     </section>
 
@@ -40,7 +98,7 @@
       <header class="topbar">
         <div>
           <p class="muted">Bem-vindo de volta</p>
-          <h2>Olá, Marcos!</h2>
+          <h2>Olá, <span id="userName">usuário</span>!</h2>
         </div>
         <button class="avatar" id="avatarBtn">M</button>
       </header>
@@ -236,6 +294,8 @@
     </section>
   </div>
 
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="config.js"></script>
   <script src="script.js"></script>
 </body>

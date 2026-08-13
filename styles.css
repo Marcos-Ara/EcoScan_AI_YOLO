@@ -490,3 +490,56 @@ body[data-theme="dark"] .drag-bar {
   letter-spacing: .04em;
   pointer-events: none;
 }
+
+
+/* ============================================================
+   AUTENTICAÇÃO FIREBASE
+============================================================ */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+}
+.google-btn {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.google-btn:hover { background: var(--surface-2); }
+.google-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-weight: 800;
+  color: #4285f4;
+  background: #fff;
+  border: 1px solid #e4e4e4;
+}
+.auth-message {
+  min-height: 22px;
+  font-size: .88rem;
+  line-height: 1.4;
+  text-align: center;
+}
+.auth-message.success { color: var(--primary-dark); }
+.auth-message.error { color: #c62828; }
+.auth-message.info { color: var(--muted); }
+.btn.is-loading { opacity: .7; pointer-events: none; }
+.verify-actions { margin-top: 22px; }
