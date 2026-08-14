@@ -1,6 +1,6 @@
-# EcoScan AI — Deploy com ONNX
+# EcoScan AI — Deploy com Roboflow YOLO11
 
-A arquitetura de produção é:
+A arquitetura de produção agora é:
 
 ```text
 GitHub Pages
@@ -9,92 +9,107 @@ Frontend EcoScan
     ↓ HTTPS /predict
 Render
     ↓
-FastAPI + ONNX Runtime
+FastAPI + OpenCV + inference-sdk
+    ↓ HTTPS
+Roboflow Serverless
     ↓
-GreenSorter YOLOv7 convertido para ONNX
+YOLO11 — waste-sorting-smyr8/2
 ```
 
-## O que acontece no build
+## Modelo
 
-O Docker usa duas etapas:
+O backend usa o modelo:
 
-1. **Builder**: instala PyTorch + YOLOv7, baixa `model.pt` e executa `convert_model.py`.
-2. **Runtime**: instala apenas FastAPI, OpenCV, NumPy e ONNX Runtime e recebe somente `model.onnx`.
+```text
+waste-sorting-smyr8/2
+```
 
-O runtime não carrega PyTorch nem o código YOLOv7.
+O modelo é hospedado pelo Roboflow. O Render não instala PyTorch, YOLOv7 ou ONNX Runtime.
 
-## Conversão local
+## Variável obrigatória no Render
 
-Dentro de `backend`:
+Crie uma variável **Secret**:
+
+```text
+ROBOFLOW_API_KEY
+```
+
+Também são configuradas:
+
+```text
+ROBOFLOW_API_URL=https://serverless.roboflow.com
+ROBOFLOW_MODEL_ID=waste-sorting-smyr8/2
+CONFIDENCE=0.40
+IOU=0.45
+MAX_DETECTIONS=1
+FOCUS_MODE=true
+FOCUS_CROP_RATIO=0.90
+FOCUS_MAX_DETECTIONS=1
+ROBOFLOW_TIMEOUT_SECONDS=30
+ALLOWED_ORIGIN=https://marcos-ara.github.io
+```
+
+## Segurança
+
+A chave do Roboflow não pode ficar em `config.js`, `script.js`, GitHub ou qualquer arquivo público.
+Se uma chave real já foi exposta, revogue-a e gere outra antes de usar o ambiente de produção.
+
+## Endpoint
+
+O frontend continua chamando:
+
+```text
+POST /predict
+```
+
+com o campo multipart:
+
+```text
+file
+```
+
+A resposta mantém a estrutura esperada pelo frontend:
+
+```json
+{
+  "predictions": [
+    {
+      "source_class": "metal",
+      "class_name": "Metal",
+      "category": "Metal",
+      "category_key": "metal",
+      "bin": "🟡 Amarela",
+      "destination": "Reciclagem",
+      "decomposition": "Varia por material",
+      "score": 0.91,
+      "bbox": [10, 20, 300, 400]
+    }
+  ]
+}
+```
+
+## Modo foco
+
+Por padrão o backend recorta a região central da imagem e retorna apenas a melhor detecção. Isso preserva a melhoria já obtida no EcoScan de trabalhar com um objeto por vez.
+
+## Local
+
+No PowerShell:
 
 ```powershell
-python download_model.py
-python convert_model.py
+cd backend
+$env:ROBOFLOW_API_KEY="SUA_CHAVE_NOVA"
+$env:ROBOFLOW_MODEL_ID="waste-sorting-smyr8/2"
+.\start_backend.ps1
 ```
 
-Se o ambiente virtual estiver na raiz do projeto e você estiver dentro de `backend`, também pode usar:
-
-```powershell
-& "..\.venv\Scripts\python.exe" download_model.py
-& "..\.venv\Scripts\python.exe" convert_model.py
-```
-
-A conversão deve terminar com:
+Teste:
 
 ```text
-[EcoScan] Dry-run OK: (1, N, 9)
-[EcoScan] ONNX Runtime OK: inferência de teste concluída.
-[EcoScan] CONVERSÃO CONCLUÍDA COM SUCESSO
-```
-
-O `N` depende do tamanho da entrada. Com `IMG_SIZE=224`, o YOLOv7 GreenSorter normalmente produz 3087 candidatos.
-
-## Erro `Import "models..."` no VS Code
-
-O YOLOv7 original usa imports absolutos como `models.*` e `utils.*`. O projeto mantém esse comportamento porque o checkpoint também depende desses nomes.
-
-O arquivo `pyrightconfig.json` já informa ao Pylance que:
-
-```text
-backend/GreenSorter/yolov7
-```
-
-é um caminho de importação.
-
-Se o aviso continuar no VS Code, faça:
-
-1. `Ctrl + Shift + P`
-2. `Python: Restart Language Server`
-3. ou `Developer: Reload Window`
-
-O import correto continua sendo:
-
-```python
-from models.experimental import attempt_load
-```
-
-Não troque para um import relativo do pacote, porque o código original do YOLOv7 usa `models` e `utils` como módulos de topo.
-
-## API
-
-Depois de iniciar:
-
-```text
-http://127.0.0.1:8000/
 http://127.0.0.1:8000/health
 http://127.0.0.1:8000/docs
 ```
 
-`POST /predict` recebe uma imagem no campo `file`.
+## Observação
 
-## Render
-
-O `render.yaml` aponta para o `Dockerfile`. A conversão acontece durante o build, portanto `model.pt` não precisa estar no estágio final do container.
-
-Antes do deploy, confira a URL em `config.js`:
-
-```js
-window.ECOSCAN_API_BASE = 'https://SEU-ENDERECO.onrender.com';
-```
-
-Não use `localhost` nessa configuração quando o frontend estiver no GitHub Pages.
+Os arquivos antigos `convert_model.py`, `download_model.py` e `GreenSorter/yolov7` permanecem na base para histórico/local, mas não participam mais do Docker de produção.

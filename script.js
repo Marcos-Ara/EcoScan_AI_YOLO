@@ -108,7 +108,7 @@ const MIN_CONFIDENCE = 0.35;
 
 const MAX_BOXES = 1;
 
-const MAX_FRAME_WIDTH = 320;
+const MAX_FRAME_WIDTH = 640;
 
 const API_TIMEOUT_MS = 30000;
 

@@ -1,9 +1,8 @@
 # ============================================================
 # EcoScan AI - Runtime
 #
-# NÃO instala PyTorch.
-# NÃO instala YOLOv7.
-# O runtime utiliza somente ONNX Runtime.
+# O Render agora usa o modelo YOLO11 hospedado no Roboflow.
+# NÃO instala PyTorch, YOLOv7 ou ONNX Runtime localmente.
 # ============================================================
 
 fastapi==0.115.6
@@ -12,4 +11,4 @@ python-multipart==0.0.20
 
 numpy==1.26.4
 opencv-python-headless==4.10.0.84
-onnxruntime==1.20.1
+inference-sdk

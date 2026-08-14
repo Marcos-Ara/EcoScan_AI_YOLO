@@ -9,17 +9,20 @@ services:
     healthCheckPath: /health
 
     envVars:
-      - key: DEVICE
-        value: cpu
+      - key: ROBOFLOW_API_KEY
+        sync: false
+
+      - key: ROBOFLOW_API_URL
+        value: https://serverless.roboflow.com
+
+      - key: ROBOFLOW_MODEL_ID
+        value: waste-sorting-smyr8/2
 
       - key: CONFIDENCE
-        value: "0.35"
+        value: "0.40"
 
       - key: IOU
         value: "0.45"
-
-      - key: IMG_SIZE
-        value: "224"
 
       - key: MAX_FILE_SIZE
         value: "1500000"
@@ -28,7 +31,22 @@ services:
         value: "960"
 
       - key: MAX_DETECTIONS
-        value: "20"
+        value: "1"
+
+      - key: FOCUS_MODE
+        value: "true"
+
+      - key: FOCUS_CROP_RATIO
+        value: "0.90"
+
+      - key: FOCUS_MAX_DETECTIONS
+        value: "1"
+
+      - key: DEBUG_PREDICTIONS
+        value: "false"
+
+      - key: ROBOFLOW_TIMEOUT_SECONDS
+        value: "30"
 
       - key: ALLOWED_ORIGIN
-        value: "*"
+        value: https://marcos-ara.github.io

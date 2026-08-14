@@ -2,22 +2,28 @@
 .git
 .gitignore
 
-# Documentação e arquivos que não entram no build
+# Documentação
 *.md
 *.pdf
 *.ipynb
 
-# Ferramentas/testes do repositório YOLOv7 que não são necessários
-backend/GreenSorter/yolov7/tools/
-backend/GreenSorter/yolov7/paper/
-backend/GreenSorter/yolov7/deploy/
-backend/GreenSorter/yolov7/train.py
-backend/GreenSorter/yolov7/train_aux.py
-backend/GreenSorter/yolov7/test.py
-backend/GreenSorter/yolov7/detect.py
-backend/GreenSorter/yolov7/export.py
+# Modelo local / artefatos antigos
+backend/model.pt
+backend/model.onnx
+
+# Código YOLOv7 antigo que não participa mais do deploy
+backend/GreenSorter/
+backend/convert_model.py
+backend/download_model.py
+backend/requirements-build.txt
+backend/start_backend.ps1
+backend/verify_setup.py
+backend/requirements-local.txt
 
 # Caches
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
+venv/
+node_modules/

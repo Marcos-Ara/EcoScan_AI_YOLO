@@ -1,18 +1,30 @@
-import os
+import asyncio
 import gc
-import time
+import os
 import threading
+import time
+import unicodedata
 from pathlib import Path
+from typing import Any
+
+import cv2
+import numpy as np
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from inference_sdk import InferenceHTTPClient
 
 # ============================================================
-# EcoScan AI - Runtime leve para Render Free
+# EcoScan AI - Runtime usando Roboflow YOLO11
 # ============================================================
-# Esta versão NÃO carrega PyTorch/YOLOv7 em produção.
-# O modelo é convertido para ONNX durante o build e o runtime
-# utiliza apenas ONNX Runtime + OpenCV.
+# O modelo agora é executado no Roboflow Serverless.
+# O Render fica responsável somente por:
+#   - FastAPI
+#   - OpenCV
+#   - envio da imagem ao Roboflow
+#   - normalização da resposta
+#   - modo de foco / melhor detecção
 #
-# Objetivo: reduzir drasticamente o consumo de RAM do serviço
-# Free (512 MiB) e evitar OOM durante o startup.
+# Isso elimina PyTorch, YOLOv7, model.pt e ONNX do runtime.
 # ============================================================
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -20,76 +32,119 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
-import cv2
-import numpy as np
-import onnxruntime as ort
-
 cv2.setNumThreads(1)
 try:
     cv2.ocl.setUseOpenCL(False)
 except Exception:
     pass
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-
 ROOT = Path(__file__).resolve().parent
-MODEL_PATH = ROOT / "model.onnx"
-
-if not MODEL_PATH.exists():
-    raise RuntimeError(
-        f"Modelo ONNX não encontrado: {MODEL_PATH}. "
-        "O Dockerfile deve convertê-lo durante o build."
-    )
 
 # ============================================================
 # CONFIGURAÇÃO
 # ============================================================
 
-CONFIDENCE = float(os.getenv("CONFIDENCE", "0.35"))
-IOU = float(os.getenv("IOU", "0.45"))
-IMG_SIZE = int(os.getenv("IMG_SIZE", "224"))
+ROBOFLOW_API_URL = os.getenv(
+    "ROBOFLOW_API_URL",
+    "https://serverless.roboflow.com",
+).rstrip("/")
 
-MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "1500000"))
-MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "960"))
-MAX_DETECTIONS = int(os.getenv("MAX_DETECTIONS", "20"))
+ROBOFLOW_API_KEY = os.getenv(
+    "ROBOFLOW_API_KEY",
+    "",
+).strip()
 
-# Modo de foco: o modelo recebe apenas uma região central da imagem.
-# Isso reduz falsos positivos do fundo e força o uso em um único objeto.
-FOCUS_MODE = os.getenv("FOCUS_MODE", "true").lower() in {
-    "1", "true", "yes", "on"
+ROBOFLOW_MODEL_ID = os.getenv(
+    "ROBOFLOW_MODEL_ID",
+    "waste-sorting-smyr8/2",
+).strip()
+
+CONFIDENCE = float(
+    os.getenv("CONFIDENCE", "0.40")
+)
+
+IOU = float(
+    os.getenv("IOU", "0.45")
+)
+
+MAX_FILE_SIZE = int(
+    os.getenv("MAX_FILE_SIZE", "1500000")
+)
+
+MAX_IMAGE_DIMENSION = int(
+    os.getenv("MAX_IMAGE_DIMENSION", "960")
+)
+
+MAX_DETECTIONS = max(
+    1,
+    min(
+        20,
+        int(os.getenv("MAX_DETECTIONS", "1")),
+    ),
+)
+
+FOCUS_MODE = os.getenv(
+    "FOCUS_MODE",
+    "true",
+).lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
 }
+
 FOCUS_CROP_RATIO = float(
     os.getenv("FOCUS_CROP_RATIO", "0.90")
 )
+
 FOCUS_CROP_RATIO = min(
     1.0,
-    max(0.55, FOCUS_CROP_RATIO)
+    max(0.55, FOCUS_CROP_RATIO),
 )
 
-# Em modo de foco, retornamos apenas a melhor detecção.
-FOCUS_MAX_DETECTIONS = int(
-    os.getenv("FOCUS_MAX_DETECTIONS", "1")
-)
 FOCUS_MAX_DETECTIONS = max(
     1,
-    min(3, FOCUS_MAX_DETECTIONS)
+    min(
+        3,
+        int(os.getenv("FOCUS_MAX_DETECTIONS", "1")),
+    ),
 )
 
 DEBUG_PREDICTIONS = os.getenv(
-    "DEBUG_PREDICTIONS", "false"
+    "DEBUG_PREDICTIONS",
+    "false",
 ).lower() in {
-    "1", "true", "yes", "on"
+    "1",
+    "true",
+    "yes",
+    "on",
 }
 
-# Uma única inferência por vez.
+ROBOFLOW_TIMEOUT_SECONDS = float(
+    os.getenv("ROBOFLOW_TIMEOUT_SECONDS", "30")
+)
+
+# Uma inferência por vez. Isso ajuda o plano Free do Render.
 INFERENCE_LOCK = threading.Lock()
 
+# ============================================================
+# CLASSES DO MODELO -> REGRAS DO ECOSCAN
+# ============================================================
+
+# O modelo escolhido trabalha com:
+# paper, plastic, glass, metal, cardboard.
+# As aliases abaixo tornam a integração tolerante a variações
+# de capitalização/nome retornadas pelo Roboflow.
+
 CLASS_MAP = {
+    "paper": "papel",
+    "paper_board": "papel",
+    "paperboard": "papel",
     "cardboard": "papel",
+    "plastic": "plastico",
+    "plastics": "plastico",
+    "glass": "vidro",
     "metal": "metal",
-    "rigid_plastic": "plastico",
-    "soft_plastic": "plastico",
 }
 
 RULES = {
@@ -98,127 +153,93 @@ RULES = {
         "bin": "🔵 Azul",
         "destination": "Reciclagem",
         "decomposition": "3–6 meses",
+        "fact": (
+            "Papel e papelão devem estar, de preferência, secos "
+            "e sem restos de comida."
+        ),
     },
     "plastico": {
         "category": "Plástico",
         "bin": "🔴 Vermelha",
         "destination": "Reciclagem",
         "decomposition": "Varia por material",
-    },
-    "metal": {
-        "category": "Metal",
-        "bin": "🟡 Amarela",
-        "destination": "Reciclagem",
-        "decomposition": "Varia por material",
+        "fact": (
+            "Garrafas PET, embalagens e outros plásticos devem ir "
+            "para a coleta seletiva."
+        ),
     },
     "vidro": {
         "category": "Vidro",
         "bin": "🟢 Verde",
         "destination": "Reciclagem",
         "decomposition": "Muito longo",
+        "fact": "Vidro deve ser encaminhado para a coleta seletiva.",
+    },
+    "metal": {
+        "category": "Metal",
+        "bin": "🟡 Amarela",
+        "destination": "Reciclagem",
+        "decomposition": "Varia por material",
+        "fact": (
+            "Latas, tampas e outros metais devem ser encaminhados "
+            "para reciclagem."
+        ),
     },
     "organico": {
         "category": "Orgânico",
         "bin": "🟤 Marrom",
         "destination": "Compostagem",
         "decomposition": "Varia",
+        "fact": (
+            "Restos de alimentos e cascas podem ser destinados à compostagem."
+        ),
     },
     "rejeito": {
         "category": "Rejeito",
         "bin": "⚫ Cinza/Preta",
         "destination": "Rejeitos",
         "decomposition": "Varia",
+        "fact": (
+            "Resíduos que não podem ser reciclados devem ser destinados "
+            "aos rejeitos."
+        ),
     },
 }
 
-# Ordem oficial do GreenSorter.
-MODEL_NAMES = [
-    "cardboard",
-    "metal",
-    "rigid_plastic",
-    "soft_plastic",
-]
+# ============================================================
+# ROBOfLOW CLIENT
+# ============================================================
 
-# ============================================================
-# ONNX RUNTIME
-# ============================================================
+roboflow_client: InferenceHTTPClient | None = None
+
+if ROBOFLOW_API_KEY:
+    roboflow_client = InferenceHTTPClient(
+        api_url=ROBOFLOW_API_URL,
+        api_key=ROBOFLOW_API_KEY,
+    )
+else:
+    print(
+        "[EcoScan] AVISO: ROBOFLOW_API_KEY não configurada.",
+        flush=True,
+    )
 
 print("=" * 60, flush=True)
-print("[EcoScan] Inicializando runtime ONNX...", flush=True)
-print(f"[EcoScan] Modelo: {MODEL_PATH}", flush=True)
-print(f"[EcoScan] Tamanho do modelo: {MODEL_PATH.stat().st_size / 1024 / 1024:.1f} MB", flush=True)
-print(f"[EcoScan] Image size: {IMG_SIZE}", flush=True)
+print("[EcoScan] Inicializando runtime Roboflow...", flush=True)
+print(f"[EcoScan] API: {ROBOFLOW_API_URL}", flush=True)
+print(f"[EcoScan] Modelo: {ROBOFLOW_MODEL_ID}", flush=True)
 print(f"[EcoScan] Confidence: {CONFIDENCE}", flush=True)
 print(f"[EcoScan] IoU: {IOU}", flush=True)
 print(f"[EcoScan] Max file size: {MAX_FILE_SIZE} bytes", flush=True)
 print(f"[EcoScan] Max image dimension: {MAX_IMAGE_DIMENSION}px", flush=True)
-print(f"[EcoScan] Focus mode: {FOCUS_MODE} ({FOCUS_CROP_RATIO:.2f})", flush=True)
+print(f"[EcoScan] Focus mode: {FOCUS_MODE}", flush=True)
+print(f"[EcoScan] Focus crop: {FOCUS_CROP_RATIO:.2f}", flush=True)
 print(f"[EcoScan] Focus max detections: {FOCUS_MAX_DETECTIONS}", flush=True)
-
-session_options = ort.SessionOptions()
-session_options.intra_op_num_threads = 1
-session_options.inter_op_num_threads = 1
-session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
-session_options.enable_mem_pattern = False
-session_options.enable_cpu_mem_arena = False
-
-load_start = time.perf_counter()
-
-try:
-    session = ort.InferenceSession(
-        str(MODEL_PATH),
-        sess_options=session_options,
-        providers=["CPUExecutionProvider"],
-    )
-except Exception as exc:
-    print(f"[EcoScan] ERRO AO CARREGAR ONNX: {exc!r}", flush=True)
-    raise
-
-load_time = time.perf_counter() - load_start
-
-inputs = session.get_inputs()
-outputs = session.get_outputs()
-
-if not inputs:
-    raise RuntimeError("Modelo ONNX não possui entrada.")
-
-if not outputs:
-    raise RuntimeError("Modelo ONNX não possui saída.")
-
-input_meta = inputs[0]
-INPUT_NAME = input_meta.name
-OUTPUT_NAMES = [item.name for item in outputs]
-
-output_shape = outputs[0].shape
-if len(output_shape) == 3:
-    output_values = output_shape[-1]
-    if isinstance(output_values, int) and output_values != 9:
-        raise RuntimeError(
-            "Saída ONNX incompatível com o GreenSorter de 4 classes: "
-            f"shape={output_shape}. Esperado [1,N,9]."
-        )
-
-# O export é estático em 224x224. Se alguém configurar outro tamanho
-# no ambiente, é melhor falhar no startup do que enviar um tensor que
-# o ONNX não aceita.
-input_shape = input_meta.shape
-if len(input_shape) == 4:
-    static_h = input_shape[2]
-    static_w = input_shape[3]
-    if isinstance(static_h, int) and isinstance(static_w, int):
-        if static_h != IMG_SIZE or static_w != IMG_SIZE:
-            raise RuntimeError(
-                "IMG_SIZE incompatível com o modelo ONNX: "
-                f"ambiente={IMG_SIZE}, modelo={static_h}x{static_w}. "
-                "Use o mesmo tamanho usado na conversão."
-            )
-
-print(f"[EcoScan] ONNX carregado em {load_time:.2f}s", flush=True)
-print(f"[EcoScan] Input: {INPUT_NAME} shape={input_meta.shape}", flush=True)
-print(f"[EcoScan] Outputs: {OUTPUT_NAMES}", flush=True)
-print("[EcoScan] Runtime: CPU / 1 thread", flush=True)
+print(
+    f"[EcoScan] Roboflow API key: {'configured' if ROBOFLOW_API_KEY else 'missing'}",
+    flush=True,
+)
 print("=" * 60, flush=True)
+
 
 # ============================================================
 # FASTAPI
@@ -226,15 +247,24 @@ print("=" * 60, flush=True)
 
 app = FastAPI(
     title="EcoScan AI YOLO API",
-    version="2.0.0",
+    version="3.0.0",
     description=(
-        "API leve de detecção de resíduos usando "
-        "GreenSorter exportado para ONNX."
+        "API do EcoScan usando o modelo waste-sorting-smyr8/2 "
+        "hospedado pelo Roboflow."
     ),
 )
 
-allowed_origin = os.getenv("ALLOWED_ORIGIN", "*")
-origins = [item.strip() for item in allowed_origin.split(",") if item.strip()]
+allowed_origin = os.getenv(
+    "ALLOWED_ORIGIN",
+    "https://marcos-ara.github.io",
+)
+
+origins = [
+    item.strip()
+    for item in allowed_origin.split(",")
+    if item.strip()
+]
+
 if not origins:
     origins = ["*"]
 
@@ -248,532 +278,300 @@ app.add_middleware(
 
 
 @app.get("/")
-def root():
+def root() -> dict[str, Any]:
     return {
         "service": "EcoScan AI YOLO API",
         "status": "online",
-        "model": "GreenSorter ONNX",
-        "version": "2.0.0",
+        "model": ROBOFLOW_MODEL_ID,
+        "runtime": "Roboflow Serverless",
+        "version": "3.0.0",
+        "roboflow_configured": bool(ROBOFLOW_API_KEY),
         "health": "/health",
         "predict": "/predict",
         "docs": "/docs",
     }
 
 
+@app.head("/")
+def root_head():
+    # O Render envia HEAD / durante o health/probe.
+    return {}
+
+
 @app.get("/health")
-def health():
+def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "model_loaded": True,
-        "model": "GreenSorter ONNX",
-        "runtime": "onnxruntime",
-        "device": "cpu",
-        "classes": MODEL_NAMES,
+        "model_loaded": bool(ROBOFLOW_API_KEY),
+        "model": ROBOFLOW_MODEL_ID,
+        "runtime": "roboflow-serverless",
+        "device": "remote",
         "confidence": CONFIDENCE,
         "iou": IOU,
-        "img_size": IMG_SIZE,
         "max_file_size": MAX_FILE_SIZE,
         "max_image_dimension": MAX_IMAGE_DIMENSION,
-        "inference_lock": "enabled",
+        "max_detections": MAX_DETECTIONS,
         "focus_mode": FOCUS_MODE,
         "focus_crop_ratio": FOCUS_CROP_RATIO,
         "focus_max_detections": FOCUS_MAX_DETECTIONS,
-        "debug_predictions": DEBUG_PREDICTIONS,
+        "roboflow_configured": bool(ROBOFLOW_API_KEY),
+        "model_id": ROBOFLOW_MODEL_ID,
     }
 
 
 # ============================================================
-# MODO DE FOCO
+# HELPERS
 # ============================================================
+
+
+def normalize_key(value: Any) -> str:
+    return (
+        unicodedata.normalize("NFD", str(value or ""))
+        .strip()
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+
+def prettify_class_name(value: Any) -> str:
+    text = str(value or "").replace("_", " ").strip()
+    return " ".join(
+        part.capitalize()
+        for part in text.split()
+    ) or "Objeto"
+
+
+def resolve_rule(source_class: Any) -> tuple[str | None, dict[str, str] | None]:
+    normalized = normalize_key(source_class)
+    category_key = CLASS_MAP.get(normalized)
+
+    if category_key is None and normalized in RULES:
+        category_key = normalized
+
+    if category_key is None:
+        return None, None
+
+    return category_key, RULES.get(category_key)
+
 
 def center_crop(
     image: np.ndarray,
     crop_ratio: float,
-):
-    """
-    Recorta uma região central quadrada.
-    Retorna:
-      crop, offset_x, offset_y
-    """
+) -> tuple[np.ndarray, int, int]:
     h, w = image.shape[:2]
 
     if h <= 0 or w <= 0:
         raise ValueError("Imagem sem dimensões válidas.")
 
-    side = int(
-        round(
-            min(h, w) * crop_ratio
-        )
-    )
+    side = int(round(min(h, w) * crop_ratio))
+    side = max(32, min(side, h, w))
 
-    side = max(
-        32,
-        min(side, h, w)
-    )
-
-    x0 = max(
-        0,
-        (w - side) // 2
-    )
-
-    y0 = max(
-        0,
-        (h - side) // 2
-    )
-
-    x1 = min(
-        w,
-        x0 + side
-    )
-
-    y1 = min(
-        h,
-        y0 + side
-    )
+    x0 = max(0, (w - side) // 2)
+    y0 = max(0, (h - side) // 2)
 
     crop = image[
-        y0:y1,
-        x0:x1
+        y0:y0 + side,
+        x0:x0 + side,
     ].copy()
 
     return crop, x0, y0
 
 
-def select_focus_predictions(
-    predictions,
-    image_shape,
-):
-    """
-    Seleciona somente as melhores detecções em modo de foco.
-
-    Dá pequeno peso à proximidade do centro para evitar que
-    uma detecção menor nas bordas do recorte seja escolhida
-    no lugar do objeto central.
-    """
-    if not predictions:
-        return []
+def focus_score(prediction: dict[str, Any], image_shape: tuple[int, int, int]) -> float:
+    bbox = prediction.get("bbox") or []
+    if len(bbox) < 4:
+        return -1.0
 
     h, w = image_shape[:2]
+    x, y, bw, bh = [float(v) for v in bbox[:4]]
 
-    cx_target = w / 2.0
-    cy_target = h / 2.0
+    center_x = x + bw / 2.0
+    center_y = y + bh / 2.0
 
-    diag = max(
-        1.0,
-        (w * w + h * h) ** 0.5
+    target_x = w / 2.0
+    target_y = h / 2.0
+    diag = max(1.0, (w * w + h * h) ** 0.5)
+
+    distance = (
+        (center_x - target_x) ** 2
+        + (center_y - target_y) ** 2
+    ) ** 0.5
+
+    center_bonus = max(
+        0.0,
+        1.0 - min(0.35, (distance / diag) * 0.35),
     )
 
-    ranked = []
+    score = float(prediction.get("score", 0.0))
+    return score * center_bonus
 
-    for item in predictions:
-        bbox = item.get("bbox")
 
-        if not bbox or len(bbox) < 4:
-            continue
+def normalize_prediction(
+    prediction: dict[str, Any],
+    crop_offset_x: int,
+    crop_offset_y: int,
+    original_width: int,
+    original_height: int,
+) -> dict[str, Any] | None:
+    source_class = prediction.get("class")
+    if source_class is None:
+        source_class = prediction.get("label")
 
-        x, y, bw, bh = [
-            float(value)
-            for value in bbox[:4]
-        ]
+    category_key, rule = resolve_rule(source_class)
+    if rule is None or category_key is None:
+        return None
 
-        center_x = x + bw / 2.0
-        center_y = y + bh / 2.0
-
-        distance = (
-            (
-                (center_x - cx_target) ** 2
-                + (center_y - cy_target) ** 2
-            ) ** 0.5
-        ) / diag
-
+    try:
         score = float(
-            item.get("score", 0.0)
-        )
-
-        # Mantém a confiança dominante e usa a posição
-        # apenas como desempate suave.
-        focus_score = (
-            score
-            * (
-                1.0
-                - min(
-                    0.30,
-                    distance * 0.30
-                )
+            prediction.get(
+                "confidence",
+                prediction.get("score", 0.0),
             )
         )
+    except (TypeError, ValueError):
+        return None
 
-        ranked.append(
-            (
-                focus_score,
-                score,
-                item
-            )
-        )
+    if not np.isfinite(score) or score < CONFIDENCE:
+        return None
 
-    ranked.sort(
-        key=lambda value: (
-            value[0],
-            value[1]
-        ),
-        reverse=True
-    )
+    try:
+        x = float(prediction.get("x", 0.0))
+        y = float(prediction.get("y", 0.0))
+        width = float(prediction.get("width", 0.0))
+        height = float(prediction.get("height", 0.0))
+    except (TypeError, ValueError):
+        return None
 
-    return [
-        item
-        for _, _, item
-        in ranked[
-            :FOCUS_MAX_DETECTIONS
-        ]
-    ]
+    if width <= 0 or height <= 0:
+        return None
 
+    x1 = x - width / 2.0 + crop_offset_x
+    y1 = y - height / 2.0 + crop_offset_y
 
-# ============================================================
-# PREPROCESSAMENTO
-# ============================================================
+    x1 = max(0.0, min(x1, float(original_width)))
+    y1 = max(0.0, min(y1, float(original_height)))
 
-def letterbox(
-    image: np.ndarray,
-    new_size: int,
-):
-    """Redimensiona mantendo proporção e completa com cinza 114."""
+    width = min(width, float(original_width) - x1)
+    height = min(height, float(original_height) - y1)
 
-    h, w = image.shape[:2]
+    if width <= 0 or height <= 0:
+        return None
 
-    if h <= 0 or w <= 0:
-        raise ValueError("Imagem sem dimensões válidas.")
-
-    ratio = min(new_size / w, new_size / h)
-
-    new_w = max(1, int(round(w * ratio)))
-    new_h = max(1, int(round(h * ratio)))
-
-    if (new_w, new_h) != (w, h):
-        resized = cv2.resize(
-            image,
-            (new_w, new_h),
-            interpolation=cv2.INTER_AREA,
-        )
-    else:
-        resized = image
-
-    pad_w = new_size - new_w
-    pad_h = new_size - new_h
-
-    left = pad_w // 2
-    top = pad_h // 2
-
-    output = np.full(
-        (new_size, new_size, 3),
-        114,
-        dtype=np.uint8,
-    )
-
-    output[
-        top:top + new_h,
-        left:left + new_w
-    ] = resized
-
-    return output, ratio, left, top
+    return {
+        "source_class": normalize_key(source_class),
+        "class_name": prettify_class_name(source_class),
+        "category": rule["category"],
+        "category_key": category_key,
+        "bin": rule["bin"],
+        "destination": rule["destination"],
+        "decomposition": rule["decomposition"],
+        "fact": rule["fact"],
+        "score": score,
+        "bbox": [
+            int(round(x1)),
+            int(round(y1)),
+            int(round(width)),
+            int(round(height)),
+        ],
+    }
 
 
-def prepare_input(frame: np.ndarray):
-    image, ratio, pad_x, pad_y = letterbox(
-        frame,
-        IMG_SIZE,
-    )
-
-    rgb = cv2.cvtColor(
-        image,
-        cv2.COLOR_BGR2RGB,
-    )
-
-    # float32 é o formato esperado pelo modelo exportado.
-    tensor = rgb.transpose(2, 0, 1)
-    tensor = np.ascontiguousarray(tensor, dtype=np.float32)
-    tensor /= 255.0
-    tensor = np.expand_dims(tensor, axis=0)
-
-    return tensor, ratio, pad_x, pad_y
-
-
-# ============================================================
-# PÓS-PROCESSAMENTO YOLO
-# ============================================================
-
-def _normalize_output(output):
-    """
-    Aceita os formatos mais comuns do export YOLOv7:
-      [1, N, 5+C]
-      [N, 5+C]
-      [1, 5+C, N]
-    """
-    arr = np.asarray(output)
-
-    # Remove dimensões unitárias extras.
-    arr = np.squeeze(arr)
-
-    if arr.ndim != 2:
+def normalize_roboflow_result(
+    result: Any,
+    crop_offset_x: int,
+    crop_offset_y: int,
+    original_width: int,
+    original_height: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not isinstance(result, dict):
         raise ValueError(
-            f"Formato de saída ONNX inesperado: {arr.shape}"
+            f"Resposta inesperada do Roboflow: {type(result).__name__}"
         )
 
-    # Para GreenSorter são 9 valores:
-    # x, y, w, h, objectness + 4 classes.
-    expected = 5 + len(MODEL_NAMES)
+    raw_predictions = result.get("predictions")
 
-    if arr.shape[1] == expected:
-        return arr
+    if raw_predictions is None:
+        # Alguns formatos podem usar uma chave diferente.
+        raw_predictions = result.get("results", [])
 
-    if arr.shape[0] == expected:
-        return arr.T
+    if not isinstance(raw_predictions, list):
+        raw_predictions = []
 
-    # Alguns exports end-to-end podem entregar 6 valores:
-    # x1,y1,x2,y2,score,class.
-    if arr.shape[1] == 6:
-        return arr
+    predictions: list[dict[str, Any]] = []
 
-    if arr.shape[0] == 6:
-        return arr.T
-
-    raise ValueError(
-        f"Saída ONNX incompatível: {arr.shape}. "
-        f"Esperado [N,{expected}] ou [N,6]."
-    )
-
-
-def compute_iou(box, boxes):
-    x1 = np.maximum(box[0], boxes[:, 0])
-    y1 = np.maximum(box[1], boxes[:, 1])
-    x2 = np.minimum(box[2], boxes[:, 2])
-    y2 = np.minimum(box[3], boxes[:, 3])
-
-    inter_w = np.maximum(0.0, x2 - x1)
-    inter_h = np.maximum(0.0, y2 - y1)
-    inter = inter_w * inter_h
-
-    area_a = max(
-        0.0,
-        (box[2] - box[0]) * (box[3] - box[1]),
-    )
-
-    area_b = np.maximum(
-        0.0,
-        (boxes[:, 2] - boxes[:, 0])
-        * (boxes[:, 3] - boxes[:, 1]),
-    )
-
-    union = area_a + area_b - inter
-    return inter / np.maximum(union, 1e-9)
-
-
-def nms_class_aware(boxes, scores, class_ids, iou_threshold):
-    """NMS simples e controlado para manter baixo o uso de RAM."""
-
-    if not len(boxes):
-        return []
-
-    keep = []
-
-    for class_id in np.unique(class_ids):
-        indices = np.where(class_ids == class_id)[0]
-        order = indices[
-            np.argsort(scores[indices])[::-1]
-        ]
-
-        while order.size:
-            current = int(order[0])
-            keep.append(current)
-
-            if order.size == 1:
-                break
-
-            rest = order[1:]
-            ious = compute_iou(
-                boxes[current],
-                boxes[rest],
-            )
-
-            order = rest[
-                ious <= iou_threshold
-            ]
-
-    keep.sort(
-        key=lambda index: float(scores[index]),
-        reverse=True,
-    )
-
-    return keep[:MAX_DETECTIONS]
-
-
-def decode_predictions(
-    output,
-    original_shape,
-    ratio,
-    pad_x,
-    pad_y,
-):
-    raw = _normalize_output(output)
-
-    if raw.shape[1] == 6:
-        # End-to-end: x1,y1,x2,y2,score,class
-        boxes = raw[:, :4].astype(np.float32, copy=False)
-        scores = raw[:, 4].astype(np.float32, copy=False)
-        class_ids = raw[:, 5].astype(np.int32, copy=False)
-
-        valid = (
-            np.isfinite(scores)
-            & (scores >= CONFIDENCE)
-            & (class_ids >= 0)
-            & (class_ids < len(MODEL_NAMES))
-        )
-
-        boxes = boxes[valid]
-        scores = scores[valid]
-        class_ids = class_ids[valid]
-
-    else:
-        # YOLOv7 padrão:
-        # x, y, w, h, objectness, class scores...
-        cx = raw[:, 0]
-        cy = raw[:, 1]
-        bw = raw[:, 2]
-        bh = raw[:, 3]
-        objectness = raw[:, 4]
-
-        class_scores = raw[:, 5:]
-
-        class_ids = np.argmax(
-            class_scores,
-            axis=1,
-        ).astype(np.int32)
-
-        class_conf = class_scores[
-            np.arange(len(class_scores)),
-            class_ids,
-        ]
-
-        scores = objectness * class_conf
-
-        valid = (
-            np.isfinite(scores)
-            & (scores >= CONFIDENCE)
-            & (objectness > 0)
-        )
-
-        cx = cx[valid]
-        cy = cy[valid]
-        bw = bw[valid]
-        bh = bh[valid]
-        scores = scores[valid]
-        class_ids = class_ids[valid]
-
-        x1 = cx - bw / 2.0
-        y1 = cy - bh / 2.0
-        x2 = cx + bw / 2.0
-        y2 = cy + bh / 2.0
-
-        boxes = np.column_stack(
-            (x1, y1, x2, y2)
-        ).astype(np.float32, copy=False)
-
-    if not len(boxes):
-        return []
-
-    # Coordenadas do modelo -> imagem original.
-    boxes[:, [0, 2]] = (
-        boxes[:, [0, 2]] - pad_x
-    ) / ratio
-
-    boxes[:, [1, 3]] = (
-        boxes[:, [1, 3]] - pad_y
-    ) / ratio
-
-    height, width = original_shape[:2]
-
-    boxes[:, [0, 2]] = np.clip(
-        boxes[:, [0, 2]],
-        0,
-        width,
-    )
-
-    boxes[:, [1, 3]] = np.clip(
-        boxes[:, [1, 3]],
-        0,
-        height,
-    )
-
-    valid_size = (
-        (boxes[:, 2] > boxes[:, 0])
-        & (boxes[:, 3] > boxes[:, 1])
-    )
-
-    boxes = boxes[valid_size]
-    scores = scores[valid_size]
-    class_ids = class_ids[valid_size]
-
-    if not len(boxes):
-        return []
-
-    keep = nms_class_aware(
-        boxes,
-        scores,
-        class_ids,
-        IOU,
-    )
-
-    results = []
-
-    for index in keep:
-        class_id = int(class_ids[index])
-
-        source_class = MODEL_NAMES[class_id]
-        category_key = CLASS_MAP.get(source_class)
-
-        if category_key is None:
+    for raw_prediction in raw_predictions:
+        if not isinstance(raw_prediction, dict):
             continue
 
-        x1, y1, x2, y2 = boxes[index].tolist()
+        normalized = normalize_prediction(
+            raw_prediction,
+            crop_offset_x,
+            crop_offset_y,
+            original_width,
+            original_height,
+        )
 
-        rule = RULES[category_key]
+        if normalized is not None:
+            predictions.append(normalized)
 
-        results.append({
-            "source_class": source_class,
-            "category": rule["category"],
-            "category_key": category_key,
-            "bin": rule["bin"],
-            "destination": rule["destination"],
-            "decomposition": rule["decomposition"],
-            "score": float(scores[index]),
-            "bbox": [
-                int(round(x1)),
-                int(round(y1)),
-                max(0, int(round(x2 - x1))),
-                max(0, int(round(y2 - y1))),
-            ],
-        })
-
-    results.sort(
-        key=lambda item: item["score"],
+    # Ordena por confiança e, em foco, privilegia o objeto central.
+    predictions.sort(
+        key=lambda item: (
+            focus_score(item, (original_height, original_width, 3))
+            if FOCUS_MODE else float(item["score"]),
+            float(item["score"]),
+        ),
         reverse=True,
     )
 
-    return results[:MAX_DETECTIONS]
+    limit = (
+        FOCUS_MAX_DETECTIONS
+        if FOCUS_MODE
+        else MAX_DETECTIONS
+    )
+
+    predictions = predictions[:limit]
+
+    meta = {
+        "raw_prediction_count": len(raw_predictions),
+        "accepted_prediction_count": len(predictions),
+    }
+
+    if DEBUG_PREDICTIONS:
+        meta["raw_predictions"] = raw_predictions
+
+    return predictions, meta
+
+
+def run_roboflow_inference(image: np.ndarray) -> Any:
+    if roboflow_client is None:
+        raise RuntimeError(
+            "ROBOFLOW_API_KEY não configurada no Render."
+        )
+
+    # O SDK oficial aceita NumPy arrays diretamente.
+    return roboflow_client.infer(
+        image,
+        model_id=ROBOFLOW_MODEL_ID,
+    )
 
 
 # ============================================================
 # PREDICT
 # ============================================================
 
+
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     request_id = id(file)
     request_start = time.perf_counter()
 
-    raw = None
-    frame = None
-    input_tensor = None
-    output = None
+    raw: bytes | None = None
+    frame: np.ndarray | None = None
+    inference_frame: np.ndarray | None = None
 
     print("=" * 60, flush=True)
     print(
@@ -781,19 +579,21 @@ async def predict(file: UploadFile = File(...)):
         flush=True,
     )
     print(
-        f"[EcoScan][{request_id}] Filename: {file.filename}",
-        flush=True,
-    )
-    print(
-        f"[EcoScan][{request_id}] Content-Type: {file.content_type}",
+        f"[EcoScan][{request_id}] Modelo: {ROBOFLOW_MODEL_ID}",
         flush=True,
     )
 
     try:
-        if (
-            not file.content_type
-            or not file.content_type.startswith("image/")
-        ):
+        if roboflow_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "ROBOFLOW_API_KEY não está configurada no Render. "
+                    "Configure a variável de ambiente e faça um novo deploy."
+                ),
+            )
+
+        if not file.content_type or not file.content_type.startswith("image/"):
             raise HTTPException(
                 status_code=400,
                 detail="Envie uma imagem.",
@@ -816,12 +616,6 @@ async def predict(file: UploadFile = File(...)):
                 ),
             )
 
-        print(
-            f"[EcoScan][{request_id}] "
-            f"Arquivo recebido: {len(raw)} bytes",
-            flush=True,
-        )
-
         array = np.frombuffer(
             raw,
             dtype=np.uint8,
@@ -842,30 +636,14 @@ async def predict(file: UploadFile = File(...)):
 
         original_h, original_w = frame.shape[:2]
 
-        print(
-            f"[EcoScan][{request_id}] "
-            f"Resolução original: "
-            f"{original_w}x{original_h}",
-            flush=True,
-        )
-
-        if (
-            original_w > MAX_IMAGE_DIMENSION
-            or original_h > MAX_IMAGE_DIMENSION
-        ):
+        if original_w > MAX_IMAGE_DIMENSION or original_h > MAX_IMAGE_DIMENSION:
             scale = min(
                 MAX_IMAGE_DIMENSION / original_w,
                 MAX_IMAGE_DIMENSION / original_h,
             )
 
-            new_w = max(
-                1,
-                int(original_w * scale),
-            )
-            new_h = max(
-                1,
-                int(original_h * scale),
-            )
+            new_w = max(1, int(round(original_w * scale)))
+            new_h = max(1, int(round(original_h * scale)))
 
             frame = cv2.resize(
                 frame,
@@ -873,142 +651,78 @@ async def predict(file: UploadFile = File(...)):
                 interpolation=cv2.INTER_AREA,
             )
 
-            print(
-                f"[EcoScan][{request_id}] "
-                f"Redimensionada para {new_w}x{new_h}",
-                flush=True,
-            )
+        original_h, original_w = frame.shape[:2]
 
         # ----------------------------------------------------
-        # MODO DE FOCO
+        # FOCO EM UM OBJETO
         # ----------------------------------------------------
-        # Por padrão usamos somente a região central.
-        # Isso reduz a influência de objetos/background nas bordas
-        # e funciona melhor para o uso "um objeto por vez".
+        crop_offset_x = 0
+        crop_offset_y = 0
         inference_frame = frame
-        focus_offset_x = 0
-        focus_offset_y = 0
 
         if FOCUS_MODE:
-            (
-                inference_frame,
-                focus_offset_x,
-                focus_offset_y,
-            ) = center_crop(
+            inference_frame, crop_offset_x, crop_offset_y = center_crop(
                 frame,
                 FOCUS_CROP_RATIO,
             )
 
-            print(
-                f"[EcoScan][{request_id}] "
-                f"FOCUS crop: "
-                f"{inference_frame.shape[1]}x"
-                f"{inference_frame.shape[0]} "
-                f"offset=({focus_offset_x},{focus_offset_y})",
-                flush=True,
-            )
-
-        input_tensor, ratio, pad_x, pad_y = prepare_input(
-            inference_frame
-        )
-
         print(
             f"[EcoScan][{request_id}] "
-            f"Tensor: {input_tensor.shape}",
+            f"Imagem enviada ao Roboflow: "
+            f"{inference_frame.shape[1]}x{inference_frame.shape[0]}",
             flush=True,
         )
 
-        lock_start = time.perf_counter()
-
-        # Timeout para evitar uma requisição ficar presa
-        # indefinidamente esperando o detector.
-        acquired = INFERENCE_LOCK.acquire(
-            timeout=25
-        )
-
+        # ----------------------------------------------------
+        # UMA INFERÊNCIA POR VEZ
+        # ----------------------------------------------------
+        acquired = INFERENCE_LOCK.acquire(timeout=25)
         if not acquired:
             raise HTTPException(
                 status_code=503,
-                detail=(
-                    "Detector ocupado. "
-                    "Tente novamente em alguns segundos."
-                ),
+                detail="Detector ocupado. Tente novamente em alguns segundos.",
             )
-
-        lock_wait = time.perf_counter() - lock_start
 
         try:
             inference_start = time.perf_counter()
 
-            print(
-                f"[EcoScan][{request_id}] "
-                ">>> INICIANDO INFERÊNCIA ONNX <<<",
-                flush=True,
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    run_roboflow_inference,
+                    inference_frame,
+                ),
+                timeout=ROBOFLOW_TIMEOUT_SECONDS,
             )
 
-            output = session.run(
-                OUTPUT_NAMES,
-                {
-                    INPUT_NAME: input_tensor
-                },
-            )[0]
-
-            inference_time = (
-                time.perf_counter()
-                - inference_start
-            )
-
-            print(
-                f"[EcoScan][{request_id}] "
-                f">>> INFERÊNCIA FINALIZADA: "
-                f"{inference_time:.2f}s <<<",
-                flush=True,
-            )
+            inference_time = time.perf_counter() - inference_start
 
         finally:
             INFERENCE_LOCK.release()
 
-        results = decode_predictions(
-            output,
-            inference_frame.shape,
-            ratio,
-            pad_x,
-            pad_y,
+        predictions, result_meta = normalize_roboflow_result(
+            result,
+            crop_offset_x,
+            crop_offset_y,
+            original_w,
+            original_h,
         )
 
-        if FOCUS_MODE:
-            for item in results:
-                bbox = item.get("bbox")
-
-                if bbox and len(bbox) >= 4:
-                    bbox[0] += int(focus_offset_x)
-                    bbox[1] += int(focus_offset_y)
-
-            results = select_focus_predictions(
-                results,
-                frame.shape,
-            )
+        total_time = time.perf_counter() - request_start
 
         if DEBUG_PREDICTIONS:
             print(
-                f"[EcoScan][{request_id}] "
-                f"Predições finais: {results}",
+                f"[EcoScan][{request_id}] Roboflow result: {result}",
                 flush=True,
             )
 
-        total_time = (
-            time.perf_counter()
-            - request_start
-        )
-
         print(
             f"[EcoScan][{request_id}] "
-            f"Detecções: {len(results)}",
+            f"Detecções aceitas: {len(predictions)}",
             flush=True,
         )
         print(
             f"[EcoScan][{request_id}] "
-            f"Tempo inferência: {inference_time:.3f}s",
+            f"Inferência Roboflow: {inference_time:.3f}s",
             flush=True,
         )
         print(
@@ -1019,46 +733,56 @@ async def predict(file: UploadFile = File(...)):
         print("=" * 60, flush=True)
 
         return {
-            "predictions": results,
-            "model": "GreenSorter ONNX",
+            "predictions": predictions,
+            "model": ROBOFLOW_MODEL_ID,
+            "runtime": "roboflow-serverless",
             "image": {
                 "width": original_w,
                 "height": original_h,
+            },
+            "focus": {
+                "enabled": FOCUS_MODE,
+                "crop_ratio": FOCUS_CROP_RATIO,
+                "max_detections": FOCUS_MAX_DETECTIONS,
             },
             "performance": {
                 "inference_time_seconds": round(
                     inference_time,
                     3,
                 ),
-                "lock_wait_seconds": round(
-                    lock_wait,
-                    3,
-                ),
                 "total_time_seconds": round(
                     total_time,
                     3,
                 ),
-                "img_size": IMG_SIZE,
             },
+            "meta": result_meta,
         }
 
     except HTTPException:
         raise
 
-    except MemoryError:
+    except asyncio.TimeoutError as exc:
         print(
-            f"[EcoScan][{request_id}] "
-            "MEMORY ERROR durante a requisição.",
+            f"[EcoScan][{request_id}] Timeout Roboflow.",
             flush=True,
         )
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "O Roboflow demorou mais que o limite configurado. "
+                "Tente novamente."
+            ),
+        ) from exc
 
+    except MemoryError as exc:
+        print(
+            f"[EcoScan][{request_id}] MEMORY ERROR.",
+            flush=True,
+        )
         raise HTTPException(
             status_code=503,
-            detail=(
-                "Memória insuficiente para processar "
-                "esta imagem."
-            ),
-        )
+            detail="Memória insuficiente para processar esta imagem.",
+        ) from exc
 
     except Exception as exc:
         print(
@@ -1066,21 +790,18 @@ async def predict(file: UploadFile = File(...)):
             f"ERRO: {type(exc).__name__}: {exc}",
             flush=True,
         )
-
         raise HTTPException(
-            status_code=500,
+            status_code=502,
             detail=(
-                "Erro interno ao processar a imagem."
+                "Não foi possível executar a inferência no Roboflow. "
+                f"{type(exc).__name__}"
             ),
-        )
+        ) from exc
 
     finally:
-        # Liberar referências temporárias SEM tocar na sessão ONNX.
         raw = None
         frame = None
-        input_tensor = None
-        output = None
-
+        inference_frame = None
         gc.collect()
 
         try:

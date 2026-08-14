@@ -1,3 +1,2 @@
-# Ambiente local completo: conversão + API.
--r requirements-build.txt
+# Ambiente local para testar a API EcoScan com Roboflow.
 -r requirements.txt

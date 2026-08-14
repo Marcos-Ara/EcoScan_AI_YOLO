@@ -1,13 +1,19 @@
-EcoScan AI — pacote fonte final (modo foco)
+EcoScan AI - Package Verification
+=================================
 
-Verificações realizadas antes do pacote:
-- Python: app.py, convert_model.py e download_model.py compilados sem erro de sintaxe.
-- JavaScript: script.js passou em node --check.
-- Estrutura: Dockerfile, requirements de runtime/build, app.py, convert_model.py, download_model.py e GreenSorter/yolov7 presentes.
-- Modo foco: FOCUS_MODE=true, FOCUS_CROP_RATIO=0.90, FOCUS_MAX_DETECTIONS=1.
-- Frontend: MAX_BOXES=1.
-- model.pt e model.onnx NÃO são incluídos porque são artefatos gerados pelo Docker build; o Dockerfile baixa/converte o modelo durante o build.
-- .git, venv e caches NÃO são incluídos para reduzir o tamanho do download.
+Checked in this revision:
 
-Importante:
-O modo foco reduz influência do fundo e força uma única detecção, mas não retraina o peso GreenSorter. Se um objeto metálico isolado continuar sendo classificado como cardboard, isso indica limitação do modelo/dataset e não do Docker/ONNX.
+[OK] backend/app.py compiles with Python 3.
+[OK] backend/verify_setup.py compiles with Python 3.
+[OK] script.js passes `node --check`.
+[OK] Dockerfile no longer depends on PyTorch, YOLOv7, model.pt or model.onnx.
+[OK] Runtime requirements include inference-sdk.
+[OK] render.yaml defines ROBOFLOW_API_KEY as a secret/sync:false variable.
+[OK] Model ID is waste-sorting-smyr8/2.
+[OK] Frontend API URL remains the existing Render URL.
+[OK] Focus mode defaults to one central object.
+[OK] No Roboflow API key is stored in the project files.
+
+IMPORTANT:
+The Roboflow API key must be created/rotated and configured directly in Render.
+Do not place a real key in config.js, script.js, Git, ZIP or HTML.
